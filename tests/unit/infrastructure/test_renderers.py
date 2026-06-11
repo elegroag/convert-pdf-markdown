@@ -342,8 +342,8 @@ class TestCodeLanguageDetection:
         assert "```" in body
         assert "```css" not in body
 
-    def test_html_code_uses_ts_fence(self) -> None:
-        """HTML code uses ```ts fence."""
+    def test_html_code_uses_html_fence(self) -> None:
+        """HTML code uses ```html fence."""
         doc = _make_doc(
             blocks_by_page=[
                 [
@@ -353,7 +353,7 @@ class TestCodeLanguageDetection:
             ]
         )
         body = MarkdownRenderer().render(doc).pages[0].content
-        assert "```ts" in body
+        assert "```html" in body
 
     def test_python_code_uses_python_fence(self) -> None:
         """Python code uses ```python fence."""

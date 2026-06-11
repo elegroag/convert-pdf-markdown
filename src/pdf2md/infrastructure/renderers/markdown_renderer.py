@@ -31,6 +31,7 @@ from pdf2md.domain.exceptions import RenderingError
 from pdf2md.domain.ports.ports import IRenderer
 from pdf2md.domain.services.anchor_slug import AnchorSlug
 from pdf2md.domain.services.caption_inference import infer_captions
+from pdf2md.domain.services.code_line_joiner import CodeLineJoiner
 from pdf2md.domain.services.frontmatter_builder import FrontmatterBuilder
 from pdf2md.domain.services.heading_inferer import HeadingInferer
 from pdf2md.domain.services.paragraph_joiner import ParagraphJoiner
@@ -340,10 +341,16 @@ class MarkdownRenderer(IRenderer):
                     code_lines = []
                 chunks.append(self._escape_leading_hash(_escape_html_in_text(block.text)))
             else:
-                if code_lines:
-                    chunks.append(self._flush_code(code_lines))
-                    code_lines = []
-                chunks.append(self._escape_leading_hash(_escape_html_in_text(block.text)))
+                # PARAGRAPH block — check if it's actually HTML/code misclassified
+                if _is_pure_html_block(block.text) or _looks_like_code_line(block.text):
+                    # Treat as code block to preserve formatting
+                    code_lines.append(block.text)
+                else:
+                    # Flush any pending code before emitting prose
+                    if code_lines:
+                        chunks.append(self._flush_code(code_lines))
+                        code_lines = []
+                    chunks.append(self._escape_leading_hash(_escape_html_in_text(block.text)))
         if code_lines:
             chunks.append(self._flush_code(code_lines))
 
@@ -474,6 +481,62 @@ _NEWLINE_RE = re.compile(r"[\r\n]+")
 
 # Pattern to match HTML/JSX tags in text (opening, closing, self-closing)
 _HTML_TAG_IN_TEXT_RE = re.compile(r"<(/?)(\w[\w-]*)([^>]*?)(/?)\s*>")
+
+# Pattern to detect if a line is an HTML tag (opening, closing, or self-closing)
+# This regex is more permissive to allow > inside attribute values
+_HTML_LINE_RE = re.compile(r"^\s*<[^!][^>]*>\s*$")
+# More permissive version that allows > inside attribute values
+_HTML_LINE_PERMISSIVE_RE = re.compile(r"^\s*<[^!][\s\S]*?>\s*$")
+
+# Pattern to detect if a line is a DOCTYPE or similar HTML declaration
+_HTML_DECL_RE = re.compile(r"^\s*<!DOCTYPE[^>]*>\s*$", re.IGNORECASE)
+
+# Pattern to detect if a line looks like code (for classification purposes)
+_CODE_LINE_RE = re.compile(
+    r"(^\s*(export|import|const|let|var|function|class|return|def|if|for|while|async)\s+)"
+    r"|(^\s*//)|(^\s*/\*)|(=>)|(\$\{)"
+    r"|(^\s*\{.*\}\s*$)"  # Single line with braces
+    r"|(^\s*\}[\s,;\)]*\s*$)"  # Closing brace
+)
+
+
+def _is_pure_html_block(text: str) -> bool:
+    """Return True if the text consists only of HTML tags.
+
+    Detects blocks like ``<!DOCTYPE html>\\n<html>\\n<head>`` that were
+    mis-classified as paragraphs by PyMuPDF but are actually code.
+    """
+    lines = text.splitlines()
+    if len(lines) < 1:
+        return False
+    html_lines = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _HTML_LINE_PERMISSIVE_RE.match(stripped) or _HTML_DECL_RE.match(stripped):
+            html_lines += 1
+    # If ALL non-empty lines are HTML tags, treat as code
+    return html_lines > 0 and html_lines == len([l for l in lines if l.strip()])
+
+
+def _looks_like_code_line(text: str) -> bool:
+    """Return True if the text looks like a line of code."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # Check against code patterns
+    if _CODE_LINE_RE.search(stripped):
+        return True
+    # Check for common code characteristics
+    # Ends with { or } or => without sentence-ending punctuation
+    if stripped.endswith(("{", "}", "=>")) and not stripped.endswith((".", "!", "?")):
+        return True
+    # Contains typical code characters
+    if "{" in stripped and "}" in stripped:
+        return True
+    return False
+
 
 def _escape_html_in_text(text: str) -> str:
     """Escape HTML tags in prose text by prefixing '<' with '+'.

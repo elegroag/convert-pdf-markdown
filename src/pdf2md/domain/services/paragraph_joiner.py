@@ -13,7 +13,8 @@ merges consecutive blocks that satisfy all of:
 - the first block is NOT followed by a clearly new sentence (heuristic:
   the next block starts with a lowercase letter OR with no leading
   capital — i.e. mid-sentence continuation);
-- a line ending in ``-`` strips the hyphen and joins (word-wrap case).
+- a line ending in ``-`` strips the hyphen and joins (word-wrap case);
+- the next block is NOT a pure HTML block (misclassified as paragraph).
 
 The joiner is a pure function: same input → same output, no I/O.
 """
@@ -29,9 +30,28 @@ _SIZE_TOLERANCE = 0.2
 _TERMINAL_PUNCT_RE = re.compile(r"[.;:?!»\"'\)\]]\s*$")
 _HYPHEN_END_RE = re.compile(r"[-‐-―]\s*$")
 
+# Pattern to detect if a line is a pure HTML tag (opening, closing, self-closing)
+_HTML_LINE_PERMISSIVE_RE = re.compile(r"^\s*<[^!][\s\S]*?>\s*$")
+_HTML_DECL_RE = re.compile(r"^\s*<!DOCTYPE[^>]*>\s*$", re.IGNORECASE)
+
 
 class ParagraphJoiner:
     """Stateless namespace for joining fragmented paragraph lines."""
+
+    @staticmethod
+    def _is_pure_html_block(text: str) -> bool:
+        """Return True if the text consists only of HTML tags."""
+        lines = text.splitlines()
+        if len(lines) < 1:
+            return False
+        html_lines = 0
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if _HTML_LINE_PERMISSIVE_RE.match(stripped) or _HTML_DECL_RE.match(stripped):
+                html_lines += 1
+        return html_lines > 0 and html_lines == len([l for l in lines if l.strip()])
 
     @staticmethod
     def _same_profile(a: ContentBlock, b: ContentBlock) -> bool:
@@ -99,6 +119,9 @@ class ParagraphJoiner:
     @classmethod
     def _should_join(cls, prev: ContentBlock, nxt: ContentBlock) -> bool:
         if not cls._same_profile(prev, nxt):
+            return False
+        # Never join a pure HTML block with prose (HTML blocks should stay separate)
+        if cls._is_pure_html_block(nxt.text):
             return False
         if cls._ends_in_terminal_punct(prev.text):
             return False
