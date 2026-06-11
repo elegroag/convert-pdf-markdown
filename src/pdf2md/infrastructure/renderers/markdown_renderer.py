@@ -331,19 +331,19 @@ class MarkdownRenderer(IRenderer):
                     chunks.append(self._flush_code(code_lines))
                     code_lines = []
                 level = HeadingInferer.resolve_level(block, font_levels)
-                chunks.append(self._format_heading(block.text, level))
+                chunks.append(self._format_heading(_escape_html_in_text(block.text), level))
             elif block.block_type == BlockType.CODE.value:
                 code_lines.append(block.text)
             elif block.block_type == BlockType.LIST_ITEM.value:
                 if code_lines:
                     chunks.append(self._flush_code(code_lines))
                     code_lines = []
-                chunks.append(self._escape_leading_hash(block.text))
+                chunks.append(self._escape_leading_hash(_escape_html_in_text(block.text)))
             else:
                 if code_lines:
                     chunks.append(self._flush_code(code_lines))
                     code_lines = []
-                chunks.append(self._escape_leading_hash(block.text))
+                chunks.append(self._escape_leading_hash(_escape_html_in_text(block.text)))
         if code_lines:
             chunks.append(self._flush_code(code_lines))
 
@@ -471,6 +471,27 @@ class MarkdownRenderer(IRenderer):
 
 _PIPE_RE = re.compile(r"[|]")
 _NEWLINE_RE = re.compile(r"[\r\n]+")
+
+# Pattern to match HTML/JSX tags in text (opening, closing, self-closing)
+_HTML_TAG_IN_TEXT_RE = re.compile(r"<(/?)(\w[\w-]*)([^>]*?)(/?)\s*>")
+
+def _escape_html_in_text(text: str) -> str:
+    """Escape HTML tags in prose text by prefixing '<' with '+'.
+
+    Converts ``<script setup>`` → ``<+script setup>`` so Markdown renderers
+    display the tag literally instead of interpreting it as HTML.  Only
+    applies to non-code text blocks; code blocks are handled separately by
+    _render_code_block.
+
+    Args:
+        text: The text to process.
+
+    Returns:
+        Text with HTML tags escaped for literal display in Markdown.
+    """
+    def _replace_tag(m: re.Match) -> str:
+        return f"<+{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}>"
+    return _HTML_TAG_IN_TEXT_RE.sub(_replace_tag, text)
 
 
 def _looks_like_code(cells: list[str]) -> bool:

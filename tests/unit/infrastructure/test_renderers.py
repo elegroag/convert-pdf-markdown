@@ -661,3 +661,89 @@ class TestHtmlRenderer:
             _make_doc(metadata=PdfMetadata(title="MyBook"))
         )
         assert "MyBook" in out.pages[0].content
+
+
+class TestHtmlEscapeInProse:
+    """HTML tags in prose blocks are escaped so Markdown shows them literally."""
+
+    def test_script_tag_in_paragraph_is_escaped(self) -> None:
+        """<script setup> in a paragraph becomes <+script setup>."""
+        doc = _make_doc(
+            blocks_by_page=[
+                [
+                    ContentBlock(
+                        block_type="paragraph",
+                        text="Escribir componentes con <script setup>",
+                    )
+                ]
+            ]
+        )
+        out = MarkdownRenderer().render(doc)
+        assert "<+script setup>" in out.pages[0].content
+        assert "<script setup>" not in out.pages[0].content
+
+    def test_html_tag_in_list_item_is_escaped(self) -> None:
+        """HTML tags in list items are escaped."""
+        doc = _make_doc(
+            blocks_by_page=[
+                [
+                    ContentBlock(
+                        block_type="list_item",
+                        text="- Usar <div> dentro de <template>",
+                    )
+                ]
+            ]
+        )
+        out = MarkdownRenderer().render(doc)
+        assert "<+div>" in out.pages[0].content
+        assert "<+template>" in out.pages[0].content
+        assert "<div>" not in out.pages[0].content
+
+    def test_html_tag_in_heading_is_escaped(self) -> None:
+        """HTML tags in headings are escaped."""
+        doc = _make_doc(
+            blocks_by_page=[
+                [
+                    ContentBlock(
+                        block_type="heading",
+                        text="Configurar <script> en Vue",
+                    )
+                ]
+            ]
+        )
+        out = MarkdownRenderer().render(doc)
+        assert "<+script>" in out.pages[0].content
+        assert "<script>" not in out.pages[0].content
+
+    def test_self_closing_html_tag_is_escaped(self) -> None:
+        """Self-closing HTML tags are escaped."""
+        doc = _make_doc(
+            blocks_by_page=[
+                [
+                    ContentBlock(
+                        block_type="paragraph",
+                        text="Usa <br/> para saltos de línea",
+                    )
+                ]
+            ]
+        )
+        out = MarkdownRenderer().render(doc)
+        assert "<+br/>" in out.pages[0].content
+        assert "<br/>" not in out.pages[0].content
+
+    def test_code_blocks_are_not_escaped(self) -> None:
+        """Code blocks keep their HTML tags literally (no escaping)."""
+        doc = _make_doc(
+            blocks_by_page=[
+                [
+                    ContentBlock(
+                        block_type="code",
+                        text="<template>\n  <div>Hello</div>\n</template>",
+                    )
+                ]
+            ]
+        )
+        out = MarkdownRenderer().render(doc)
+        # Code blocks should NOT have the + prefix
+        assert "<+template>" not in out.pages[0].content
+        assert "<template>" in out.pages[0].content
