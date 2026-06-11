@@ -11,6 +11,7 @@ focuses on block-to-Markdown translation.
 
 from __future__ import annotations
 
+import html
 import io
 import os
 import re
@@ -539,22 +540,20 @@ def _looks_like_code_line(text: str) -> bool:
 
 
 def _escape_html_in_text(text: str) -> str:
-    """Escape HTML tags in prose text by prefixing '<' with '+'.
+    """Escape HTML tags in prose text using HTML entities.
 
-    Converts ``<script setup>`` → ``<+script setup>`` so Markdown renderers
-    display the tag literally instead of interpreting it as HTML.  Only
-    applies to non-code text blocks; code blocks are handled separately by
-    _render_code_block.
+    Converts ``<script setup>`` → ``<script setup>`` so Markdown
+    renderers display the tag literally instead of interpreting it as HTML.
+    Only applies to non-code text blocks; code blocks are handled separately
+    by _render_code_block.
 
     Args:
         text: The text to process.
 
     Returns:
-        Text with HTML tags escaped for literal display in Markdown.
+        Text with HTML tags escaped as HTML entities for literal display.
     """
-    def _replace_tag(m: re.Match) -> str:
-        return f"<+{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}>"
-    return _HTML_TAG_IN_TEXT_RE.sub(_replace_tag, text)
+    return html.escape(text)
 
 
 def _looks_like_code(cells: list[str]) -> bool:

@@ -667,7 +667,7 @@ class TestHtmlEscapeInProse:
     """HTML tags in prose blocks are escaped so Markdown shows them literally."""
 
     def test_script_tag_in_paragraph_is_escaped(self) -> None:
-        """<script setup> in a paragraph becomes <+script setup>."""
+        """<script setup> in a paragraph becomes <script setup>."""
         doc = _make_doc(
             blocks_by_page=[
                 [
@@ -679,7 +679,9 @@ class TestHtmlEscapeInProse:
             ]
         )
         out = MarkdownRenderer().render(doc)
-        assert "<+script setup>" in out.pages[0].content
+        # Check that < is escaped as &lt;
+        assert "&lt;script setup&gt;" in out.pages[0].content
+        # Check that original <script setup> is NOT present
         assert "<script setup>" not in out.pages[0].content
 
     def test_html_tag_in_list_item_is_escaped(self) -> None:
@@ -695,8 +697,10 @@ class TestHtmlEscapeInProse:
             ]
         )
         out = MarkdownRenderer().render(doc)
-        assert "<+div>" in out.pages[0].content
-        assert "<+template>" in out.pages[0].content
+        # Check that < is escaped as &lt;
+        assert "&lt;div&gt;" in out.pages[0].content
+        assert "&lt;template&gt;" in out.pages[0].content
+        # Check that original tags are NOT present
         assert "<div>" not in out.pages[0].content
 
     def test_html_tag_in_heading_is_escaped(self) -> None:
@@ -712,7 +716,9 @@ class TestHtmlEscapeInProse:
             ]
         )
         out = MarkdownRenderer().render(doc)
-        assert "<+script>" in out.pages[0].content
+        # Check that < is escaped as &lt;
+        assert "&lt;script&gt;" in out.pages[0].content
+        # Check that original tag is NOT present
         assert "<script>" not in out.pages[0].content
 
     def test_self_closing_html_tag_is_escaped(self) -> None:
@@ -728,7 +734,9 @@ class TestHtmlEscapeInProse:
             ]
         )
         out = MarkdownRenderer().render(doc)
-        assert "<+br/>" in out.pages[0].content
+        # Check that < is escaped as &lt;
+        assert "&lt;br/&gt;" in out.pages[0].content
+        # Check that original tag is NOT present
         assert "<br/>" not in out.pages[0].content
 
     def test_code_blocks_are_not_escaped(self) -> None:
@@ -744,6 +752,7 @@ class TestHtmlEscapeInProse:
             ]
         )
         out = MarkdownRenderer().render(doc)
-        # Code blocks should NOT have the + prefix
-        assert "<+template>" not in out.pages[0].content
+        # Code blocks should NOT have HTML entities
+        assert "&lt;template&gt;" not in out.pages[0].content
+        # The raw tags should be present (not escaped)
         assert "<template>" in out.pages[0].content
