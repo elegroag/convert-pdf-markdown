@@ -11,7 +11,6 @@ focuses on block-to-Markdown translation.
 
 from __future__ import annotations
 
-import html
 import io
 import os
 import re
@@ -536,6 +535,17 @@ def _looks_like_code_line(text: str) -> bool:
     # Contains typical code characters
     if "{" in stripped and "}" in stripped:
         return True
+    # Contains method call pattern: .method() with closing paren
+    if "." in stripped and "(" in stripped and ")" in stripped:
+        # Check if it's a complete code statement (ends with ; or )
+        if stripped.endswith((")", ";", "=>")):
+            return True
+        # Check if it looks like a complete expression (not just a mention in prose)
+        # Count opening/closing parens - if balanced, likely code
+        open_count = stripped.count("(")
+        close_count = stripped.count(")")
+        if open_count > 0 and open_count == close_count and open_count >= 2:
+            return True
     return False
 
 
@@ -547,13 +557,17 @@ def _escape_html_in_text(text: str) -> str:
     Only applies to non-code text blocks; code blocks are handled separately
     by _render_code_block.
 
+    Note: We only escape < and > to avoid breaking quotes in code samples.
+    html.escape() would also escape ' and " which corrupts code like
+    ``vm.mount('#vue-app')`` → ``vm.mount(&#x27;#vue-app&#x27;)``.
+
     Args:
         text: The text to process.
 
     Returns:
         Text with HTML tags escaped as HTML entities for literal display.
     """
-    return html.escape(text)
+    return text.replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _looks_like_code(cells: list[str]) -> bool:

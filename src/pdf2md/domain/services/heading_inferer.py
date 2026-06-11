@@ -62,6 +62,9 @@ _CODE_LOOKING_RE = re.compile(
     re.VERBOSE,
 )
 
+# Lines that look like HTML code, not headings (e.g., <!DOCTYPE html>, <html>, <head>)
+_HTML_CODE_RE = re.compile(r"^\s*<!DOCTYPE|<html|<head|<body|<script|<style|<template", re.IGNORECASE)
+
 # Soft code signals: a line that *looks* like code (lots of symbols,
 # short token length) gets a penalty rather than a hard zero. This
 # keeps the heuristic from blocking legitimate headings while
@@ -166,6 +169,8 @@ class HeadingInferer:
         if not text or _LEADING_CODE_RE.match(text):
             return 0.0
         if _CODE_LOOKING_RE.match(text):
+            return 0.0
+        if _HTML_CODE_RE.match(text):
             return 0.0
 
         score = 0.0
@@ -356,6 +361,8 @@ class HeadingInferer:
             return False
         if _CODE_LOOKING_RE.match(block.text):
             return False
+        if _HTML_CODE_RE.match(block.text):
+            return False
         if block.text.strip() in font_levels:
             return True
         words = len(_WORD_RE.findall(block.text))
@@ -390,6 +397,8 @@ class HeadingInferer:
         if _LEADING_CODE_RE.match(block.text):
             return 0
         if _CODE_LOOKING_RE.match(block.text):
+            return 0
+        if _HTML_CODE_RE.match(block.text):
             return 0
         return font_levels.get(block.text.strip(), 0)
 
