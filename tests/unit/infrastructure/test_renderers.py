@@ -474,8 +474,12 @@ class TestMarkdownRendererTables:
         assert "line1 line2" in out.pages[0].content
         assert "\nline2" not in out.pages[0].content
 
-    def test_empty_table_yields_failure_marker(self) -> None:
-        """An empty table produces the TABLE_EXTRACTION_FAILED marker."""
+    def test_empty_table_is_silently_dropped(self) -> None:
+        """A table with no headers and no rows does not produce output.
+
+        Cover pages sometimes emit placeholder tables. We drop them
+        outright instead of producing noisy GFM stubs.
+        """
         doc = _make_doc(
             blocks_by_page=[[]],
             tables_by_page=[
@@ -483,7 +487,10 @@ class TestMarkdownRendererTables:
             ],
         )
         out = MarkdownRenderer().render(doc)
-        assert "TABLE_EXTRACTION_FAILED" in out.pages[0].content
+        # The empty page + empty table renders to an empty page, which
+        # MarkdownRenderer drops from the output list.
+        assert out.pages == []
+        assert "TABLE_EXTRACTION_FAILED" not in out.to_string()
 
 
 class TestMarkdownRendererImagesAndLinks:
@@ -703,8 +710,14 @@ class TestHtmlEscapeInProse:
         # Check that original tags are NOT present
         assert "<div>" not in out.pages[0].content
 
-    def test_html_tag_in_heading_is_escaped(self) -> None:
-        """HTML tags in headings are escaped."""
+    def test_html_tag_in_heading_is_kept_as_prose(self) -> None:
+        """Short tag mentions in headings are NOT escaped.
+
+        v2.0.0: the escape is now contextual. A heading that reads
+        ``Configurar <script> en Vue`` is mostly prose — the single tag
+        should read as plain text in the Markdown source, which is what
+        the user sees.
+        """
         doc = _make_doc(
             blocks_by_page=[
                 [
@@ -716,13 +729,17 @@ class TestHtmlEscapeInProse:
             ]
         )
         out = MarkdownRenderer().render(doc)
-        # Check that < is escaped as &lt;
-        assert "&lt;script&gt;" in out.pages[0].content
-        # Check that original tag is NOT present
-        assert "<script>" not in out.pages[0].content
+        # The original tag is kept verbatim in prose context.
+        assert "Configurar <script> en Vue" in out.pages[0].content
+        assert "&lt;script&gt;" not in out.pages[0].content
 
-    def test_self_closing_html_tag_is_escaped(self) -> None:
-        """Self-closing HTML tags are escaped."""
+    def test_self_closing_html_tag_in_prose_is_kept(self) -> None:
+        """Short self-closing tags in prose are NOT escaped.
+
+        v2.0.0: contextual escape. ``Usa <br/> para saltos de línea``
+        has too low an HTML density to trigger the escape, so the tag
+        stays raw.
+        """
         doc = _make_doc(
             blocks_by_page=[
                 [
@@ -734,10 +751,32 @@ class TestHtmlEscapeInProse:
             ]
         )
         out = MarkdownRenderer().render(doc)
-        # Check that < is escaped as &lt;
-        assert "&lt;br/&gt;" in out.pages[0].content
-        # Check that original tag is NOT present
-        assert "<br/>" not in out.pages[0].content
+        assert "Usa <br/> para saltos de línea" in out.pages[0].content
+        assert "&lt;br/&gt;" not in out.pages[0].content
+
+    def test_pure_html_block_becomes_code_block(self) -> None:
+        """A paragraph that is pure HTML is rendered as a code block.
+
+        v2.0.0: a paragraph whose text is dominated by HTML tags is no
+        longer treated as prose at all — it is forwarded to the code
+        path so the rendering is consistent (e.g. ``<div>`` without
+        surrounding text). The classifier inside ``_render_page``
+        catches this case before ``_escape_html_in_text`` runs.
+        """
+        doc = _make_doc(
+            blocks_by_page=[
+                [
+                    ContentBlock(
+                        block_type="paragraph",
+                        text="<div><span>foo</span></div>",
+                    )
+                ]
+            ]
+        )
+        out = MarkdownRenderer().render(doc)
+        # The block becomes a fenced code block, NOT a prose paragraph.
+        assert "<div><span>foo</span></div>" in out.pages[0].content
+        assert "```" in out.pages[0].content
 
     def test_code_blocks_are_not_escaped(self) -> None:
         """Code blocks keep their HTML tags literally (no escaping)."""

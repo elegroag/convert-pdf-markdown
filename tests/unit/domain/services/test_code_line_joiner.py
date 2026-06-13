@@ -65,14 +65,14 @@ class TestCodeLineJoiner:
         assert out[1].text == "const y = 2;"
 
     def test_does_not_join_across_blank_line(self) -> None:
-        """A blank line in code is a paragraph break — split."""
+        """A blank line at the top level is a hard break — split."""
         lines = [
             _code("import foo from 'foo';"),
             _code(""),
             _code("import bar from 'bar';"),
         ]
         out = CodeLineJoiner().join(lines)
-        # Blank line is preserved as a single empty block.
+        # Top-level: each non-blank is its own block plus the blank.
         assert len(out) == 3
 
     def test_does_not_join_independent_assignment(self) -> None:
@@ -96,6 +96,7 @@ class TestCodeLineJoiner:
         assert "a: 1," in out[0].text
 
     def test_preserves_blank_line_in_middle(self) -> None:
+        """Blank lines INSIDE a body stay inside; closing ``}`` is separate."""
         lines = [
             _code("function foo() {"),
             _code("  return 1;"),
@@ -104,9 +105,11 @@ class TestCodeLineJoiner:
             _code("}"),
         ]
         out = CodeLineJoiner().join(lines)
-        # The body is one block; the blank line stays.
-        assert len(out) == 1
-        assert "\n\n" in out[0].text or "  return 1;" in out[0].text
+        # The body is one block with the blank embedded; the closing
+        # ``}`` is a separate block (matches ``test_joins_open_brace_continuation``).
+        assert len(out) == 2
+        assert "\n\n" in out[0].text
+        assert out[1].text == "}"
 
     def test_empty_input_returns_empty(self) -> None:
         assert CodeLineJoiner().join([]) == []
