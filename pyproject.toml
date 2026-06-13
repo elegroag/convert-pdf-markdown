@@ -50,9 +50,13 @@ api = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
 ]
+mcp = [
+    "fastmcp>=2.0",
+]
 
 [project.scripts]
 pdf2md = "pdf2md.interface.cli.app:app"
+pdf2md-mcp = "pdf2md.interface.mcp.server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

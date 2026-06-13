@@ -18,7 +18,10 @@ pip install pymupdf pdfplumber pydantic typer loguru rich
 pip install "camelot-py[cv]"
 
 # Servidor HTTP (opcional)
-pip install fastapi uvicorn
+pip install "fastapi>=0.110" uvicorn
+
+# Servidor MCP (opcional — para Cursor / Claude Desktop)
+pip install "fastmcp>=2.0"
 
 # Instalación editable en desarrollo
 pip install -e ".[dev]"
@@ -45,6 +48,73 @@ pdf2md batch ./libros/ -o ./markdowns/ --workers 4
 # Inspección estructural (sin escribir archivos)
 pdf2md inspect libro.pdf --json
 ```
+
+## Servidor MCP
+
+El servidor MCP expone la tool `convert_pdf_to_markdown` a clientes MCP
+como **Cursor** o **Claude Desktop**. No requiere autenticación; se comunica
+por stdio.
+
+### Instalación y ejecución con uvx
+
+No hace falta instalar el proyecto por separado: `uvx` resuelve dependencias
+y arranca el servidor en un entorno aislado.
+
+```bash
+# Desde el directorio del proyecto
+uvx --from "./[mcp]" pdf2md-mcp
+
+# O con ruta absoluta (útil en mcp.json)
+uvx --from "/ruta/al/convert-pdf-markdown[mcp]" pdf2md-mcp
+```
+
+Para desarrollo local también puedes usar `uv sync --extra mcp` y
+`uv run pdf2md-mcp`.
+
+### Configuración en Cursor (`mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "pdf2md": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "/ruta/al/convert-pdf-markdown[mcp]",
+        "pdf2md-mcp"
+      ]
+    }
+  }
+}
+```
+
+### Tool disponible
+
+**`convert_pdf_to_markdown`**
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `pdf_path` | Ruta al PDF de entrada |
+| `output_path` | Directorio de salida **o** ruta completa al `.md` |
+
+Cuando `output_path` es un directorio, el archivo se nombra desde el stem del PDF
+(`book.pdf` → `book.md`). Los assets de imagen se escriben en `assets/` bajo
+el mismo directorio.
+
+**Respuesta** (JSON):
+
+```json
+{
+  "status": "success",
+  "output_path": "/output/book.md",
+  "page_count": 97,
+  "image_count": 18,
+  "table_count": 4,
+  "elapsed_seconds": 24.59
+}
+```
+
+En caso de error incluye `error` y `error_message`.
 
 ## Uso como librería
 
@@ -181,8 +251,9 @@ Métricas de cobertura actuales (≥ 90% en dominio, ≥ 70% en infra):
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Capa Externa (CLI / API / Tests)                         │
-│   interface/cli (Typer)   interface/api (FastAPI)        │
+│ Capa Externa (CLI / API / MCP / Tests)                     │
+│   interface/cli (Typer)   interface/api (FastAPI)          │
+│   interface/mcp (FastMCP, stdio)                         │
 └──────────────────────────────────────────────────────────┘
                           │
                           ▼
