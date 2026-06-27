@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **`docx2md` package** — Word (.docx) to Markdown converter with Hexagonal
+  Architecture parallel to `pdf2md`.
+- **CLI `docx2md`** with `convert`, `batch`, and `version` subcommands.
+- **`python-docx` dependency** for parsing Word documents.
+- **Infrastructure**: `DocxParser`, `MarkdownRenderer`, `FileStorage`,
+  `FileAssetExporter` (PNG conversion via Pillow).
+- **Tests**: 38 unit + integration tests under `tests/unit/docx2md/`.
+
 ## [0.2.0] — 2026-06-08
 
 ### Added

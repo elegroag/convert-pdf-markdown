@@ -1,6 +1,6 @@
 # PDF2MD
 
-Intelligent PDF to Markdown converter with Hexagonal Architecture.
+Intelligent PDF and Word to Markdown converter with Hexagonal Architecture.
 
 ## Development setup
 
@@ -9,6 +9,17 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
+```
+
+## CLI rápido
+
+```bash
+# PDF → Markdown
+pdf2md convert libro.pdf -o ./output
+
+# Word → Markdown
+docx2md convert documento.docx -o ./output
+docx2md batch ./documentos/ -o ./output --workers 2
 ```
 
 ## Repository layout
@@ -22,10 +33,19 @@ src/pdf2md/
 └── interface/
     ├── cli/          # Typer CLI
     └── api/          # FastAPI server
+
+src/docx2md/
+├── domain/           # Entities, value objects, ports, use cases (no I/O deps)
+├── application/      # DTOs and ConversionService façade
+├── infrastructure/   # python-docx parser, renderers, storage
+├── config/           # Service factory
+└── interface/
+    └── cli/          # Typer CLI (convert, batch, version)
+
 tests/
 ├── unit/             # Domain + use cases
-├── integration/      # Real PDF round-trips
-└── fixtures/         # Sample PDFs
+├── integration/      # Real PDF/DOCX round-trips
+└── fixtures/         # Sample PDFs and DOCX generators
 ```
 
 ## Code conventions

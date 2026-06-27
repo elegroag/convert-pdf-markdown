@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "pymupdf>=1.24",
     "pdfplumber>=0.11",
+    "python-docx>=1.1",
     "Pillow>=10.3",
     "tabulate>=0.9",
     "pydantic>=2.7",
@@ -57,13 +58,14 @@ mcp = [
 [project.scripts]
 pdf2md = "pdf2md.interface.cli.app:app"
 pdf2md-mcp = "pdf2md.interface.mcp.server:main"
+docx2md = "docx2md.interface.cli.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["pdf2md*"]
+include = ["pdf2md*", "docx2md*"]
 
 [tool.ruff]
 line-length = 100

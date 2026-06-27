@@ -1,7 +1,7 @@
-# PDF2MD Converter
+# PDF2MD / DOCX2MD Converter
 
-Convierte libros y documentos PDF a Markdown estructurado, preservando
-jerarquía de encabezados, imágenes, tablas, enlaces y bloques de código.
+Convierte libros y documentos **PDF** y **Word (.docx)** a Markdown estructurado,
+preservando jerarquía de encabezados, imágenes, tablas, enlaces y bloques de código.
 
 Construido con **Arquitectura Hexagonal (Ports & Adapters)**: el dominio
 no depende de ninguna librería externa; los adaptadores de infraestructura
@@ -12,7 +12,7 @@ claras que facilitan el testing y el reemplazo.
 
 ```bash
 # Dependencias mínimas
-pip install pymupdf pdfplumber pydantic typer loguru rich
+pip install pymupdf pdfplumber python-docx pydantic typer loguru rich Pillow
 
 # Soporte de Camelot (opcional, para tablas lattice/stream avanzadas)
 pip install "camelot-py[cv]"
@@ -48,6 +48,28 @@ pdf2md batch ./libros/ -o ./markdowns/ --workers 4
 # Inspección estructural (sin escribir archivos)
 pdf2md inspect libro.pdf --json
 ```
+
+## DOCX2MD (Word → Markdown)
+
+```bash
+# Conversión simple
+docx2md convert documento.docx -o ./output
+
+# Sin imágenes ni frontmatter
+docx2md convert documento.docx -o ./output --no-images --no-frontmatter
+
+# Carpeta de assets personalizada
+docx2md convert documento.docx -o ./output --assets media
+
+# Batch processing
+docx2md batch ./documentos/ -o ./markdowns/ --workers 4
+
+# Versión
+docx2md version
+```
+
+Las imágenes embebidas se extraen a `<output>/assets/` (o el nombre indicado con
+`--assets`). El Markdown resultante se escribe como `<output>/<slug>.md`.
 
 ## Servidor MCP
 
