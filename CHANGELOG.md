@@ -8,6 +8,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **MCP tool `convert_docx_to_markdown`** — Word (.docx) conversion exposed
+  alongside `convert_pdf_to_markdown` in the `pdf2md-mcp` server.
 - **`docx2md` package** — Word (.docx) to Markdown converter with Hexagonal
   Architecture parallel to `pdf2md`.
 - **CLI `docx2md`** with `convert`, `batch`, and `version` subcommands.

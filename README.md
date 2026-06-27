@@ -73,9 +73,9 @@ Las imágenes embebidas se extraen a `<output>/assets/` (o el nombre indicado co
 
 ## Servidor MCP
 
-El servidor MCP expone la tool `convert_pdf_to_markdown` a clientes MCP
-como **Cursor** o **Claude Desktop**. No requiere autenticación; se comunica
-por stdio.
+El servidor MCP expone las tools `convert_pdf_to_markdown` y
+`convert_docx_to_markdown` a clientes MCP como **Cursor** o **Claude Desktop**.
+No requiere autenticación; se comunica por stdio.
 
 ### Instalación y ejecución con uvx
 
@@ -110,7 +110,7 @@ Para desarrollo local también puedes usar `uv sync --extra mcp` y
 }
 ```
 
-### Tool disponible
+### Tools disponibles
 
 **`convert_pdf_to_markdown`**
 
@@ -136,7 +136,33 @@ el mismo directorio.
 }
 ```
 
-En caso de error incluye `error` y `error_message`.
+**`convert_docx_to_markdown`**
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `docx_path` | Ruta al archivo Word (.docx) de entrada |
+| `output_path` | Directorio de salida **o** ruta completa al `.md` |
+
+Cuando `output_path` es un directorio, el archivo se nombra desde el stem del DOCX
+(`report.docx` → `report.md`). Las imágenes embebidas se escriben en `assets/`.
+
+**Respuesta** (JSON):
+
+```json
+{
+  "status": "success",
+  "output_path": "/output/report.md",
+  "total_blocks": 531,
+  "headings": 98,
+  "paragraphs": 320,
+  "tables": 6,
+  "images": 8,
+  "list_items": 45,
+  "elapsed_seconds": 0.33
+}
+```
+
+En caso de error, ambas tools incluyen `error` y `error_message`.
 
 ## Uso como librería
 

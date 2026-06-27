@@ -28,7 +28,7 @@ Al ejecutar el comando, el inspector imprime dos URLs locales:
 En la UI:
 
 1. Pulsa **Connect** (no hay autenticación).
-2. Ve a la pestaña **Tools** → `convert_pdf_to_markdown`.
+2. Ve a la pestaña **Tools** → `convert_pdf_to_markdown` o `convert_docx_to_markdown`.
 3. Rellena los argumentos:
    ```json
    {
@@ -91,7 +91,7 @@ uv run python scripts/probe_mcp.py
 
 La forma definitiva de probarlo: configurar `mcp.json` (ya documentado en el README) y pedirle al modelo que ejecute la tool. Ejemplo de prompt:
 
-> "Convierte el PDF `/ruta/a/libro.pdf` con la tool `convert_pdf_to_markdown` y muéstrame el JSON de salida."
+> "Convierte el PDF `/ruta/a/libro.pdf` con `convert_pdf_to_markdown` o el Word `/ruta/a/informe.docx` con `convert_docx_to_markdown` y muéstrame el JSON de salida."
 
 ---
 
