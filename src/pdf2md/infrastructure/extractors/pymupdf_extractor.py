@@ -8,6 +8,7 @@ a :class:`PdfDocument` with pages, text, blocks, images, and metadata.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -76,6 +77,8 @@ _MONO_FONT_HINTS: tuple[str, ...] = (
 
 # Regex used to detect list items in raw text.
 _LIST_RE = re.compile(r"^\s*(?:[-*+•●]|\d+[.)]|[a-zA-Z][.)])\s+")
+_TOC_DOTS_RE = re.compile(r"\.{4,}")
+_LETTER_RE = re.compile(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]")
 _HEADING_RE = re.compile(r"^\s*(#{1,6})\s+(.*)$", re.MULTILINE)
 
 # Characters that, when they appear at the START of the next span,
@@ -153,11 +156,30 @@ class PyMuPdfExtractor(IExtractor):
                         )
                 metadata = self._extract_metadata(doc)
                 pages: list[PdfPage] = []
+                raw_by_page: list[list[dict[str, Any]]] = []
+                page_widths: list[float] = []
                 for index in range(doc.page_count):
                     raw_page = doc.load_page(index)
                     page = PdfPage(page_number=index + 1)
                     page.raw_text = raw_page.get_text("text") or ""
-                    page.blocks = list(self._extract_blocks(raw_page, page.raw_text))
+                    raw_blocks, page_width = self._parse_raw_blocks(
+                        raw_page, page.raw_text
+                    )
+                    raw_by_page.append(raw_blocks)
+                    page_widths.append(page_width)
+                    pages.append(page)
+
+                document_body_size = self._body_size_from_raw(
+                    [block for page_blocks in raw_by_page for block in page_blocks]
+                )
+
+                for index, page in enumerate(pages):
+                    page.blocks = self._classify_blocks(
+                        raw_by_page[index],
+                        body_size=document_body_size,
+                        page_width=page_widths[index],
+                    )
+                    raw_page = doc.load_page(index)
                     if self._config.extract_images:
                         page.images = self._safe_extract_images(raw_page)
                     if self._config.extract_tables and self._table_extractor:
@@ -177,7 +199,6 @@ class PyMuPdfExtractor(IExtractor):
                         )
                     if self._config.extract_links:
                         page.links = self._safe_extract_links(raw_page, index + 1)
-                    pages.append(page)
                 if self._config.extract_images:
                     self._deduplicate_images(pages)
                 return PdfDocument(
@@ -244,20 +265,38 @@ class PyMuPdfExtractor(IExtractor):
     def _extract_blocks(
         self, raw_page: Any, text: str
     ) -> Iterable:
-        """Yield :class:`ContentBlock` instances for a page.
+        """Yield :class:`ContentBlock` instances for a page (legacy entry point)."""
+        raw_blocks, page_width = self._parse_raw_blocks(raw_page, text)
+        body_size = self._body_size_from_raw(raw_blocks)
+        return self._classify_blocks(
+            raw_blocks, body_size=body_size, page_width=page_width
+        )
 
-        The strategy is to walk the underlying ``dict`` representation
-        of the page, classify each block, and emit value objects.
-        """
+    def _parse_raw_blocks(
+        self, raw_page: Any, text: str
+    ) -> tuple[list[dict[str, Any]], float]:
+        """Parse a page into raw block dicts without heading classification."""
         try:
             page_dict = raw_page.get_text("dict")
         except Exception:  # noqa: BLE001
-            return self._blocks_from_text(text)
+            blocks = [
+                {
+                    "block_type": b.block_type,
+                    "text": b.text,
+                    "level": b.level,
+                    "font_size": b.font_size,
+                    "is_bold": b.is_bold,
+                    "bbox": b.bbox,
+                }
+                for b in self._blocks_from_text(text)
+            ]
+            return blocks, 0.0
 
-        blocks: list = []
+        blocks: list[dict[str, Any]] = []
         body = page_dict.get("blocks", []) if isinstance(page_dict, dict) else []
+        page_width = float(getattr(raw_page.rect, "width", 0.0) or 0.0)
         for block in body:
-            if block.get("type") != 0:  # text-only; skip image blocks
+            if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
                 spans = line.get("spans", [])
@@ -274,41 +313,37 @@ class PyMuPdfExtractor(IExtractor):
                 is_script_tag = bool(
                     re.match(r"</?script[^>]*>\s*$", line_text, re.IGNORECASE)
                 )
-                bbox = tuple(block.get("bbox", (0, 0, 0, 0)))  # type: ignore[assignment]
+                line_bbox = tuple(line.get("bbox", block.get("bbox", (0, 0, 0, 0))))  # type: ignore[assignment]
                 if is_mono or is_script_tag:
-                    blocks.append(
-                        {
-                            "block_type": BlockType.CODE.value,
-                            "text": line_text,
-                            "level": 0,
-                            "font_size": font_size,
-                            "is_bold": is_bold,
-                            "bbox": bbox,
-                        }
-                    )
+                    block_type = BlockType.CODE.value
                 elif _LIST_RE.match(line_text):
-                    blocks.append(
-                        {
-                            "block_type": BlockType.LIST_ITEM.value,
-                            "text": line_text,
-                            "level": 0,
-                            "font_size": font_size,
-                            "is_bold": is_bold,
-                            "bbox": bbox,
-                        }
-                    )
+                    block_type = BlockType.LIST_ITEM.value
                 else:
-                    blocks.append(
-                        {
-                            "block_type": BlockType.PARAGRAPH.value,
-                            "text": line_text,
-                            "level": 0,
-                            "font_size": font_size,
-                            "is_bold": is_bold,
-                            "bbox": bbox,
-                        }
-                    )
+                    block_type = BlockType.PARAGRAPH.value
+                blocks.append(
+                    {
+                        "block_type": block_type,
+                        "text": line_text,
+                        "level": 0,
+                        "font_size": font_size,
+                        "is_bold": is_bold,
+                        "bbox": line_bbox,
+                    }
+                )
+        return blocks, page_width
 
+    def _classify_blocks(
+        self,
+        raw_blocks: list[dict[str, Any]],
+        *,
+        body_size: float,
+        page_width: float,
+    ) -> list[ContentBlock]:
+        """Apply heading promotion and return classified content blocks."""
+        classified = [
+            self._maybe_promote_heading(raw, body_size=body_size, page_width=page_width)
+            for raw in raw_blocks
+        ]
         return [
             ContentBlock(
                 block_type=b["block_type"],
@@ -318,8 +353,111 @@ class PyMuPdfExtractor(IExtractor):
                 is_bold=b["is_bold"],
                 bbox=b["bbox"],
             )
-            for b in blocks
+            for b in classified
         ]
+
+    @staticmethod
+    def _body_size_from_raw(blocks: list[dict[str, Any]]) -> float:
+        """Return the weighted modal body font size for a page's raw block dicts."""
+        weights: Counter[float] = Counter()
+        for b in blocks:
+            if b.get("block_type") in (
+                BlockType.CODE.value,
+                BlockType.LIST_ITEM.value,
+            ):
+                continue
+            if b.get("font_size", 0.0) <= 0:
+                continue
+            size = round(b["font_size"], 2)
+            weight = 1.0
+            if b.get("is_bold"):
+                weight *= 0.3
+            if b.get("block_type") == BlockType.HEADING.value:
+                weight *= 0.2
+            weights[size] += weight
+        if not weights:
+            return 11.0
+        return weights.most_common(1)[0][0]
+
+    @staticmethod
+    def _heading_level_from_delta(delta: float) -> int:
+        """Map a font-size delta above body text to a heading level."""
+        if delta > 2.5:
+            return 1
+        if delta >= 1.5:
+            return 2
+        if delta >= 0.5:
+            return 3
+        return 0
+
+    @staticmethod
+    def _is_centered_short_title(
+        bbox: tuple[float, float, float, float],
+        page_width: float,
+        text: str,
+        font_size: float,
+        body_size: float,
+    ) -> bool:
+        """Return True when a short line is horizontally centred on the page."""
+        if page_width <= 0:
+            return False
+        stripped = text.strip()
+        if not stripped or len(stripped.split()) > 12 or len(stripped) > 80:
+            return False
+        if _TOC_DOTS_RE.search(stripped):
+            return False
+        if font_size < body_size:
+            return False
+        x0, _y0, x1, _y1 = bbox
+        if x0 == 0.0 and x1 == 0.0:
+            return False
+        line_center = (x0 + x1) / 2.0
+        page_center = page_width / 2.0
+        if abs(line_center - page_center) > page_width * 0.15:
+            return False
+        if (x1 - x0) > page_width * 0.7:
+            return False
+        letters = _LETTER_RE.findall(stripped)
+        if letters:
+            upper_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
+            if upper_ratio < 0.6:
+                return False
+        return True
+
+    def _maybe_promote_heading(
+        self,
+        raw: dict[str, Any],
+        *,
+        body_size: float,
+        page_width: float,
+    ) -> dict[str, Any]:
+        """Promote a paragraph block to HEADING when structural signals match."""
+        if raw["block_type"] != BlockType.PARAGRAPH.value:
+            return raw
+        font_size = float(raw["font_size"])
+        delta = font_size - body_size
+        text = str(raw["text"]).strip()
+        if not text:
+            return raw
+        if text[0].islower():
+            return raw
+        if _TOC_DOTS_RE.search(text):
+            return raw
+        word_count = len(text.split())
+        if word_count > 12:
+            return raw
+        level = 0
+        if raw["is_bold"] and delta >= 0.5:
+            level = self._heading_level_from_delta(delta)
+        elif delta >= 1.5:
+            level = self._heading_level_from_delta(delta)
+        elif self._is_centered_short_title(
+            raw["bbox"], page_width, text, font_size, body_size
+        ):
+            level = self._heading_level_from_delta(max(delta, 0.5))
+        if level > 0:
+            return {**raw, "block_type": BlockType.HEADING.value, "level": level}
+        return raw
 
     @staticmethod
     def _blocks_from_text(text: str) -> Iterable:

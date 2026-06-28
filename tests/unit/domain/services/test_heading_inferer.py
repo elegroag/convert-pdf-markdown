@@ -188,9 +188,9 @@ class TestInferLevelsMultiSignal:
         levels_2 = HeadingInferer().infer_levels(doc, max_level=2)
         assert len(levels_4) >= len(levels_2)
 
-    def test_default_max_level_is_four(self) -> None:
-        """The class default must be 4 (was 3 in v0.1.0)."""
-        assert HeadingInferer.DEFAULT_MAX_LEVEL == 4
+    def test_default_max_level_is_six(self) -> None:
+        """The class default must be 6 (Markdown ATX hard limit)."""
+        assert HeadingInferer.DEFAULT_MAX_LEVEL == 6
 
 
 class TestLooksLikeHeading:

@@ -34,15 +34,16 @@ from pdf2md.domain.entities.entities import PdfDocument
 from pdf2md.domain.value_objects.enums import BlockType
 from pdf2md.domain.value_objects.value_objects import ContentBlock
 
-_DEFAULT_MAX_LEVEL = 4
+_DEFAULT_MAX_LEVEL = 6
 _SIZE_QUANTUM = 0.01
-_HEADING_SCORE_THRESHOLD = 1.0
-_MAX_WORDS_FOR_HEADING = 8
+_HEADING_SCORE_THRESHOLD = 0.7
+_MAX_WORDS_FOR_HEADING = 12
 
 # Word boundary that doesn't strip unicode letters; \w already covers
 # accented chars in Python 3 re.UNICODE (default in 3.x).
 _WORD_RE = re.compile(r"\S+")
 _TRAILING_PUNCT_RE = re.compile(r"[.:;!?…»\"'\)\]]\s*$")
+_SENTENCE_END_RE = re.compile(r"[.!?…»\"'\)\]]\s*$")
 _LEADING_CODE_RE = re.compile(r"^\s*(#|//|/\*|<!--)")
 
 # Lines that are clearly code, not headings: very few letters, lots of
@@ -89,6 +90,37 @@ class HeadingInferer:
 
     DEFAULT_MAX_LEVEL: int = _DEFAULT_MAX_LEVEL
     HEADING_SCORE_THRESHOLD: float = _HEADING_SCORE_THRESHOLD
+
+    # ------------------------------------------------------------------
+    # Body-size estimation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_body_size(all_blocks: list[ContentBlock]) -> float:
+        """Return a weighted modal body font size for the document.
+
+        Bold and pre-classified heading lines are down-weighted so they
+        do not skew the body-size estimate.
+        """
+        weights: Counter[float] = Counter()
+        for block in all_blocks:
+            if block.block_type in (
+                BlockType.CODE.value,
+                BlockType.LIST_ITEM.value,
+            ):
+                continue
+            if block.font_size <= 0:
+                continue
+            size = round(block.font_size, 2)
+            weight = 1.0
+            if block.is_bold:
+                weight *= 0.3
+            if block.block_type == BlockType.HEADING.value:
+                weight *= 0.2
+            weights[size] += weight
+        if not weights:
+            return 0.0
+        return weights.most_common(1)[0][0]
 
     # ------------------------------------------------------------------
     # Scoring primitives
@@ -247,17 +279,19 @@ class HeadingInferer:
         if not all_blocks:
             return {}
 
-        # Body size = mode of font_size for non-code, non-list blocks.
-        body_candidates = [
-            round(b.font_size, 2)
-            for b in all_blocks
-            if b.block_type
-            not in (BlockType.CODE.value, BlockType.LIST_ITEM.value)
-            and b.font_size > 0
-        ]
-        if not body_candidates:
-            return {}
-        body_size, _ = Counter(body_candidates).most_common(1)[0]
+        # Body size = weighted mode of font_size for non-code, non-list blocks.
+        body_size = HeadingInferer._compute_body_size(all_blocks)
+        if body_size <= 0:
+            body_candidates = [
+                round(b.font_size, 2)
+                for b in all_blocks
+                if b.block_type
+                not in (BlockType.CODE.value, BlockType.LIST_ITEM.value)
+                and b.font_size > 0
+            ]
+            if not body_candidates:
+                return {}
+            body_size, _ = Counter(body_candidates).most_common(1)[0]
         body_avg, body_max = HeadingInferer._body_word_stats(all_blocks)
 
         # Score every block; remember its order for tiebreaking.
@@ -342,7 +376,10 @@ class HeadingInferer:
 
     @staticmethod
     def looks_like_heading(
-        block: ContentBlock, font_levels: dict[str, int]
+        block: ContentBlock,
+        font_levels: dict[str, int],
+        *,
+        body_size: float = 0.0,
     ) -> bool:
         """Heuristic: is this block promoted to a heading?
 
@@ -368,8 +405,13 @@ class HeadingInferer:
         words = len(_WORD_RE.findall(block.text))
         if words > _MAX_WORDS_FOR_HEADING:
             return False
-        if _TRAILING_PUNCT_RE.search(block.text):
+        stripped = block.text.strip()
+        if stripped.endswith(":"):
+            return True
+        if _SENTENCE_END_RE.search(block.text):
             return False
+        if body_size > 0 and block.font_size >= body_size + 1.0:
+            return True
         # Need at least one positive signal: bold, very short, or all-caps.
         if block.is_bold:
             return True
@@ -384,12 +426,10 @@ class HeadingInferer:
         """Return the heading level for a single ``block``.
 
         Precedence:
-            1. ``block.level`` if the extractor already set one.
-            2. The level mapped from the block's text, if any.
+            1. The level mapped from the block's text in ``font_levels``.
+            2. ``block.level`` if the extractor already set one.
             3. ``0`` if the block is not a heading.
         """
-        if block.level:
-            return block.level
         if not block.text.strip():
             return 0
         if block.block_type in (BlockType.CODE.value, BlockType.LIST_ITEM.value):
@@ -400,7 +440,12 @@ class HeadingInferer:
             return 0
         if _HTML_CODE_RE.match(block.text):
             return 0
-        return font_levels.get(block.text.strip(), 0)
+        key = block.text.strip()
+        if key in font_levels:
+            return font_levels[key]
+        if block.level:
+            return block.level
+        return 0
 
 
 __all__ = ["HeadingInferer"]

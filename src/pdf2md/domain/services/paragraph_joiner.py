@@ -25,7 +25,11 @@ import re
 
 from pdf2md.domain.value_objects.value_objects import ContentBlock
 
-_SIZE_TOLERANCE = 0.2
+_SIZE_TOLERANCE = 0.5
+_LINE_GAP_FACTOR = 1.4
+_NON_JOINABLE_TYPES = frozenset({"list_item", "heading", "code"})
+_BULLET_ONLY_RE = re.compile(r"^●(\u200b)?\s*$")
+_LETTER_RE = re.compile(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]")
 
 _TERMINAL_PUNCT_RE = re.compile(r"[.;:?!»\"'\)\]]\s*$")
 _HYPHEN_END_RE = re.compile(r"[-‐-―]\s*$")
@@ -77,13 +81,36 @@ class ParagraphJoiner:
         if not stripped:
             return True
         first = stripped[0]
+        # Spanish opening punctuation usually continues the same sentence.
+        if first in "«¿":
+            return False
         # Capital letter, digit, opening quote → likely new sentence.
-        if first.isupper() or first.isdigit() or first in '"\'«¿¡(':
+        if first.isupper() or first.isdigit() or first in '"\'¡(':
             return True
         # Also treat "List-like" markers as new sentences.
         if first in "-*+•●":
             return True
         return False
+
+    @classmethod
+    def _vertical_gap(cls, prev: ContentBlock, nxt: ContentBlock) -> float | None:
+        """Return the vertical gap between two blocks, or None if unknown."""
+        if prev.bbox is None or nxt.bbox is None:
+            return None
+        _px0, py0, _px1, py1 = prev.bbox
+        nx0, ny0, _nx1, _ny1 = nxt.bbox
+        if py1 == 0.0 and ny0 == 0.0:
+            return None
+        return ny0 - py1
+
+    @classmethod
+    def _has_paragraph_break(cls, prev: ContentBlock, nxt: ContentBlock) -> bool:
+        """Return True when bbox spacing indicates a new paragraph."""
+        gap = cls._vertical_gap(prev, nxt)
+        if gap is None:
+            return False
+        font_size = max(prev.font_size, nxt.font_size, 1.0)
+        return gap > font_size * _LINE_GAP_FACTOR
 
     @classmethod
     def join(cls, blocks: list[ContentBlock]) -> list[ContentBlock]:
@@ -116,30 +143,45 @@ class ParagraphJoiner:
         result.append(current)
         return result
 
+    @staticmethod
+    def _is_caps_title(text: str) -> bool:
+        """Return True when ``text`` is a short ALL-CAPS section title."""
+        stripped = text.strip()
+        if not stripped or len(stripped.split()) > 12:
+            return False
+        letters = _LETTER_RE.findall(stripped)
+        if len(letters) < 3:
+            return False
+        return sum(1 for c in letters if c.isupper()) / len(letters) >= 0.75
+
     @classmethod
     def _should_join(cls, prev: ContentBlock, nxt: ContentBlock) -> bool:
         if not cls._same_profile(prev, nxt):
             return False
+        if prev.block_type in _NON_JOINABLE_TYPES or nxt.block_type in _NON_JOINABLE_TYPES:
+            return False
+        if _BULLET_ONLY_RE.match(prev.text.strip()) or _BULLET_ONLY_RE.match(
+            nxt.text.strip()
+        ):
+            return False
+        if cls._is_caps_title(prev.text):
+            return False
         # Never join a pure HTML block with prose (HTML blocks should stay separate)
         if cls._is_pure_html_block(nxt.text):
             return False
+        if cls._has_paragraph_break(prev, nxt):
+            return False
+        stripped = prev.text.rstrip()
+        # Mid-sentence wrap markers always continue onto the next line.
+        if stripped and stripped[-1] in ",—–-":
+            return True
+        # Strong break: previous line ends a sentence and the next one
+        # clearly opens a new one.  Without terminal punctuation on the
+        # previous line we keep joining — PDF line wraps in Spanish
+        # often start with a capital letter.
         if cls._ends_in_terminal_punct(prev.text):
-            return False
-        if cls._ends_in_terminal_punct(nxt.text):
-            # Allow joining if the next line starts lowercase (still
-            # part of the same sentence). Otherwise treat as new.
-            if not cls._starts_new_sentence(nxt.text):
-                return True
-            return False
-        # If next starts a clear new sentence (capital, opening quote,
-        # bullet), prefer to split.
-        if cls._starts_new_sentence(nxt.text):
-            # But if previous was clearly mid-sentence (ends with comma
-            # or no terminal punctuation AND does not end with a closed
-            # clause), still join.
-            stripped = prev.text.rstrip()
-            if stripped and stripped[-1] in ",—–-":
-                return True
+            if cls._starts_new_sentence(nxt.text):
+                return False
             return False
         return True
 

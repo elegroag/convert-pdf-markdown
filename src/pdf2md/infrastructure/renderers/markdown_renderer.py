@@ -32,9 +32,12 @@ from pdf2md.domain.ports.ports import IRenderer
 from pdf2md.domain.services.anchor_slug import AnchorSlug
 from pdf2md.domain.services.caption_inference import infer_captions
 from pdf2md.domain.services.code_line_joiner import CodeLineJoiner
+from pdf2md.domain.services.block_sanitizer import BlockSanitizer
 from pdf2md.domain.services.frontmatter_builder import FrontmatterBuilder
 from pdf2md.domain.services.heading_inferer import HeadingInferer
+from pdf2md.domain.services.page_noise_filter import PageNoiseFilter
 from pdf2md.domain.services.paragraph_joiner import ParagraphJoiner
+from pdf2md.domain.services.section_number_joiner import SectionNumberJoiner
 from pdf2md.domain.value_objects.enums import BlockType, HeadingStyle
 from pdf2md.domain.value_objects.value_objects import ContentBlock, ConversionConfig
 
@@ -257,6 +260,8 @@ class MarkdownRenderer(IRenderer):
         """
         try:
             font_levels = HeadingInferer.infer_levels(document)
+            all_blocks = [b for page in document.pages for b in page.blocks]
+            body_size = HeadingInferer._compute_body_size(all_blocks)
             frontmatter = (
                 FrontmatterBuilder.build(
                     document.metadata, page_count=document.page_count
@@ -269,13 +274,18 @@ class MarkdownRenderer(IRenderer):
                 # v0.2.0: re-join fragmented paragraph lines before
                 # rendering. The PyMuPDF extractor emits one block per
                 # visual line, which makes prose unreadable.
-                joined_blocks = ParagraphJoiner.join(page.blocks)
+                blocks = PageNoiseFilter.filter(page.blocks)
+                blocks = BlockSanitizer.demote_false_headings(blocks)
+                blocks = SectionNumberJoiner.join(blocks)
+                joined_blocks = ParagraphJoiner.join(blocks)
                 # v0.2.0: assign captions to images from nearby text
                 # blocks before rendering.
                 infer_captions(page.images, joined_blocks)
                 page_with_joined = page
                 page_with_joined.blocks = joined_blocks
-                rendered = self._render_page(page_with_joined, font_levels)
+                rendered = self._render_page(
+                    page_with_joined, font_levels, body_size=body_size
+                )
                 if rendered:
                     pages.append(
                         MarkdownPage(
@@ -308,6 +318,8 @@ class MarkdownRenderer(IRenderer):
         self,
         page: PdfPage,
         font_levels: dict[str, int],
+        *,
+        body_size: float = 0.0,
     ) -> str:
         """Render a single page to its Markdown body."""
         chunks: list[str] = []
@@ -356,15 +368,20 @@ class MarkdownRenderer(IRenderer):
                 list_marker = None
                 continue
 
-            if block.block_type == BlockType.HEADING.value or (
+            is_heading = block.block_type == BlockType.HEADING.value or (
                 block.block_type == BlockType.PARAGRAPH.value
-                and HeadingInferer.looks_like_heading(block, font_levels)
-            ):
+                and HeadingInferer.looks_like_heading(
+                    block, font_levels, body_size=body_size
+                )
+            )
+            if is_heading:
                 if code_buffer:
                     chunks.append(self._flush_code(code_buffer))
                     code_buffer = []
                 level = HeadingInferer.resolve_level(block, font_levels)
-                chunks.append(self._format_heading(_escape_html_in_text(block.text), level))
+                if level <= 0:
+                    level = 1
+                chunks.append(self._format_heading(block.text.strip(), level))
             elif block.block_type == BlockType.CODE.value:
                 code_buffer.append(block)
             elif block.block_type == BlockType.LIST_ITEM.value:
