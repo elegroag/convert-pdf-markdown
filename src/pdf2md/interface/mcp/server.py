@@ -1,4 +1,4 @@
-"""MCP server exposing PDF and Word → Markdown conversion.
+"""MCP server exposing PDF, Word, and Excel → Markdown conversion.
 
 Run with uvx (stdio transport, no authentication)::
 
@@ -40,6 +40,13 @@ from docx2md.application.services.conversion_service import (
 from docx2md.config.service_factory import build_default_service as build_docx_service
 from docx2md.domain.services.anchor_slug import AnchorSlug as DocxAnchorSlug
 from docx2md.domain.value_objects.value_objects import ConversionConfig as DocxConversionConfig
+from xlsx2md.application.dto.dtos import ConversionRequest as XlsxConversionRequest
+from xlsx2md.application.dto.dtos import ConversionResult as XlsxConversionResult
+from xlsx2md.application.services.conversion_service import (
+    ConversionService as XlsxConversionService,
+)
+from xlsx2md.config.service_factory import build_default_service as build_xlsx_service
+from xlsx2md.domain.value_objects.value_objects import ConversionConfig as XlsxConversionConfig
 from pdf2md.application.dto.dtos import ConversionRequest, ConversionResult
 from pdf2md.application.services.conversion_service import ConversionService
 from pdf2md.config.config_loader import load_config
@@ -49,8 +56,8 @@ from pdf2md.domain.services.anchor_slug import AnchorSlug
 mcp = FastMCP(
     name="pdf2md",
     instructions=(
-        "Convert PDF and Word (.docx) documents to structured Markdown with "
-        "headings, images, tables, links, and code blocks."
+        "Convert PDF, Word (.docx), and Excel (.xlsx) documents to structured "
+        "Markdown with headings, images, tables, links, and code blocks."
     ),
 )
 
@@ -207,6 +214,39 @@ def format_docx_conversion_result(result: DocxConversionResult) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def run_xlsx_conversion(
+    xlsx_path: Path,
+    output_path: Path,
+    *,
+    service_factory=build_xlsx_service,
+    config: XlsxConversionConfig | None = None,
+) -> XlsxConversionResult:
+    """Execute a single XLSX → Markdown conversion."""
+    xlsx = xlsx_path.expanduser().resolve()
+    if not xlsx.is_file():
+        msg = f"XLSX not found: {xlsx}"
+        raise FileNotFoundError(msg)
+    if xlsx.suffix.lower() != ".xlsx":
+        msg = f"file must have .xlsx extension: {xlsx}"
+        raise ValueError(msg)
+
+    output_dir = output_path.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = config or XlsxConversionConfig()
+    service: XlsxConversionService = service_factory(output_dir=output_dir, config=cfg)
+    return service.convert(
+        XlsxConversionRequest(xlsx_path=xlsx, output_dir=output_dir, config=cfg)
+    )
+
+
+def format_xlsx_conversion_result(result: XlsxConversionResult) -> str:
+    """Serialize an xlsx :class:`ConversionResult` as JSON for MCP tool output."""
+    payload = result.to_dict()
+    payload["elapsed_seconds"] = round(result.elapsed_seconds, 2)
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 @mcp.tool
 def convert_pdf_to_markdown(pdf_path: str, output_path: str) -> str:
     """Convert a PDF file to Markdown.
@@ -251,6 +291,29 @@ def convert_docx_to_markdown(docx_path: str, output_path: str) -> str:
         msg = result.error_message or result.error or "conversion failed"
         raise RuntimeError(msg)
     return format_docx_conversion_result(result)
+
+
+@mcp.tool
+def convert_xlsx_to_markdown(xlsx_path: str, output_path: str) -> str:
+    """Convert an Excel (.xlsx) workbook to Markdown.
+
+    Args:
+        xlsx_path: Path to the source XLSX file.
+        output_path: Output directory. The converter creates a subfolder
+            named from the workbook stem (e.g. ``report.xlsx`` →
+            ``<output>/report/``) with one ``.md`` per sheet and an optional
+            ``_index.md``. Images are written to ``assets/`` inside that folder.
+
+    Returns:
+        JSON with ``status``, ``sheet_outputs``, ``index_path``,
+        sheet/row/image counts, and ``elapsed_seconds``. On failure, includes
+        ``error`` and ``error_message``.
+    """
+    result = run_xlsx_conversion(Path(xlsx_path), Path(output_path))
+    if result.status != "success":
+        msg = result.error_message or result.error or "conversion failed"
+        raise RuntimeError(msg)
+    return format_xlsx_conversion_result(result)
 
 
 def main() -> None:

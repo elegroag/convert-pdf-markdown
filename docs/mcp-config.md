@@ -28,12 +28,20 @@ Al ejecutar el comando, el inspector imprime dos URLs locales:
 En la UI:
 
 1. Pulsa **Connect** (no hay autenticación).
-2. Ve a la pestaña **Tools** → `convert_pdf_to_markdown` o `convert_docx_to_markdown`.
+2. Ve a la pestaña **Tools** → `convert_pdf_to_markdown`, `convert_docx_to_markdown`
+   o `convert_xlsx_to_markdown`.
 3. Rellena los argumentos:
    ```json
    {
      "pdf_path": "/home/elegro/proyectos/python/convert-pdf-markdown/pdfs/VUE-JS-3-001.pdf",
      "output_path": "/tmp/pdf2md-inspector-test"
+   }
+   ```
+   Para Excel, usa `xlsx_path` y un directorio de salida:
+   ```json
+   {
+     "xlsx_path": "/ruta/a/libro.xlsx",
+     "output_path": "/tmp/xlsx2md-inspector-test"
    }
    ```
 4. Pulsa **Run Tool**. Verás el JSON de respuesta y, en la pestaña **Notifications**, los logs del servidor.
@@ -91,7 +99,9 @@ uv run python scripts/probe_mcp.py
 
 La forma definitiva de probarlo: configurar `mcp.json` (ya documentado en el README) y pedirle al modelo que ejecute la tool. Ejemplo de prompt:
 
-> "Convierte el PDF `/ruta/a/libro.pdf` con `convert_pdf_to_markdown` o el Word `/ruta/a/informe.docx` con `convert_docx_to_markdown` y muéstrame el JSON de salida."
+> "Convierte el PDF `/ruta/a/libro.pdf` con `convert_pdf_to_markdown`, el Word
+> `/ruta/a/informe.docx` con `convert_docx_to_markdown`, o el Excel
+> `/ruta/a/reporte.xlsx` con `convert_xlsx_to_markdown` y muéstrame el JSON de salida."
 
 ---
 

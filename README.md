@@ -1,7 +1,7 @@
-# PDF2MD / DOCX2MD Converter
+# PDF2MD / DOCX2MD / XLSX2MD Converter
 
-Convierte libros y documentos **PDF** y **Word (.docx)** a Markdown estructurado,
-preservando jerarquía de encabezados, imágenes, tablas, enlaces y bloques de código.
+Convierte libros y documentos **PDF**, **Word (.docx)** y **Excel (.xlsx)** a Markdown
+estructurado, preservando jerarquía de encabezados, imágenes, tablas, enlaces y bloques de código.
 
 Construido con **Arquitectura Hexagonal (Ports & Adapters)**: el dominio
 no depende de ninguna librería externa; los adaptadores de infraestructura
@@ -12,7 +12,7 @@ claras que facilitan el testing y el reemplazo.
 
 ```bash
 # Dependencias mínimas
-pip install pymupdf pdfplumber python-docx pydantic typer loguru rich Pillow
+pip install pymupdf pdfplumber python-docx openpyxl pydantic typer loguru rich Pillow
 
 # Soporte de Camelot (opcional, para tablas lattice/stream avanzadas)
 pip install "camelot-py[cv]"
@@ -71,11 +71,33 @@ docx2md version
 Las imágenes embebidas se extraen a `<output>/assets/` (o el nombre indicado con
 `--assets`). El Markdown resultante se escribe como `<output>/<slug>.md`.
 
+## XLSX2MD (Excel → Markdown)
+
+```bash
+# Conversión simple (un .md por hoja + índice)
+xlsx2md convert libro.xlsx -o ./output
+
+# Sin imágenes ni índice
+xlsx2md convert libro.xlsx -o ./output --no-images --no-index
+
+# Limitar filas/columnas por hoja
+xlsx2md convert libro.xlsx -o ./output --max-rows 500 --max-cols 20
+
+# Batch processing
+xlsx2md batch ./hojas/ -o ./markdowns/ --workers 4
+
+# Versión
+xlsx2md version
+```
+
+La salida se organiza en `<output>/<slug>/` con un archivo por hoja, un `_index.md`
+opcional y las imágenes en `assets/`.
+
 ## Servidor MCP
 
-El servidor MCP expone las tools `convert_pdf_to_markdown` y
-`convert_docx_to_markdown` a clientes MCP como **Cursor** o **Claude Desktop**.
-No requiere autenticación; se comunica por stdio.
+El servidor MCP expone las tools `convert_pdf_to_markdown`,
+`convert_docx_to_markdown` y `convert_xlsx_to_markdown` a clientes MCP como
+**Cursor** o **Claude Desktop**. No requiere autenticación; se comunica por stdio.
 
 ### Instalación y ejecución con uvx
 
@@ -162,7 +184,35 @@ Cuando `output_path` es un directorio, el archivo se nombra desde el stem del DO
 }
 ```
 
-En caso de error, ambas tools incluyen `error` y `error_message`.
+En caso de error, las tres tools incluyen `error` y `error_message`.
+
+**`convert_xlsx_to_markdown`**
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `xlsx_path` | Ruta al archivo Excel (.xlsx) de entrada |
+| `output_path` | Directorio de salida (se crea `<slug>/` dentro) |
+
+Cuando `output_path` es un directorio, el conversor crea una carpeta con el slug del
+libro (p. ej. `report.xlsx` → `output/report/`) con un `.md` por hoja y un `_index.md`
+opcional. Las imágenes van a `assets/` dentro de esa carpeta.
+
+**Respuesta** (JSON):
+
+```json
+{
+  "status": "success",
+  "sheet_outputs": [
+    "/output/report/hoja-1.md",
+    "/output/report/hoja-2.md"
+  ],
+  "index_path": "/output/report/_index.md",
+  "total_sheets": 2,
+  "total_rows": 120,
+  "total_images": 3,
+  "elapsed_seconds": 0.45
+}
+```
 
 ## Uso como librería
 
