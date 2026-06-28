@@ -151,3 +151,4 @@ outputs/
 # uv lock file (if using uv)
 uv.lock
 words
+xlsx

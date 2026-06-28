@@ -33,6 +33,7 @@ dependencies = [
     "loguru>=0.7",
     "rich>=13.7",
     "pyyaml>=6.0",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -59,13 +60,14 @@ mcp = [
 pdf2md = "pdf2md.interface.cli.app:app"
 pdf2md-mcp = "pdf2md.interface.mcp.server:main"
 docx2md = "docx2md.interface.cli.app:main"
+xlsx2md = "xlsx2md.interface.cli.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["pdf2md*", "docx2md*"]
+include = ["pdf2md*", "docx2md*", "xlsx2md*"]
 
 [tool.ruff]
 line-length = 100
