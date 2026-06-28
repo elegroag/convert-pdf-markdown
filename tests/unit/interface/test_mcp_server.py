@@ -1,4 +1,4 @@
-"""Tests for the pdf2md MCP server."""
+"""Tests for the convert2md MCP server."""
 
 from __future__ import annotations
 
@@ -216,3 +216,10 @@ class TestFormatXlsxConversionResult:
         assert payload["index_path"] == "/out/book/_index.md"
         assert payload["total_sheets"] == 2
         assert payload["elapsed_seconds"] == 0.88
+
+
+class TestMcpServerMetadata:
+    def test_server_name_is_generic(self) -> None:
+        from pdf2md.interface.mcp.server import mcp
+
+        assert mcp.name == "convert2md"

@@ -106,26 +106,29 @@ y arranca el servidor en un entorno aislado.
 
 ```bash
 # Desde el directorio del proyecto
-uvx --from "./[mcp]" pdf2md-mcp
+uvx --from "./[mcp]" convert2md-mcp
 
 # O con ruta absoluta (útil en mcp.json)
-uvx --from "/ruta/al/convert-pdf-markdown[mcp]" pdf2md-mcp
+uvx --from "/ruta/al/convert-pdf-markdown[mcp]" convert2md-mcp
 ```
 
 Para desarrollo local también puedes usar `uv sync --extra mcp` y
-`uv run pdf2md-mcp`.
+`uv run convert2md-mcp`.
+
+> **Nota:** `pdf2md-mcp` sigue disponible como alias heredado; se recomienda
+> migrar a `convert2md-mcp`.
 
 ### Configuración en Cursor (`mcp.json`)
 
 ```json
 {
   "mcpServers": {
-    "pdf2md": {
+    "convert2md": {
       "command": "uvx",
       "args": [
         "--from",
         "/ruta/al/convert-pdf-markdown[mcp]",
-        "pdf2md-mcp"
+        "convert2md-mcp"
       ]
     }
   }

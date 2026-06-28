@@ -24,6 +24,9 @@ docx2md batch ./documentos/ -o ./output --workers 2
 # Excel → Markdown
 xlsx2md convert libro.xlsx -o ./output
 xlsx2md batch ./hojas/ -o ./output --workers 2
+
+# MCP (PDF + Word + Excel)
+uvx --from "/ruta/al/convert-pdf-markdown[mcp]" convert2md-mcp
 ```
 
 ## Repository layout
@@ -36,7 +39,8 @@ src/pdf2md/
 ├── config/           # TOML loader and service factory
 └── interface/
     ├── cli/          # Typer CLI
-    └── api/          # FastAPI server
+    ├── api/          # FastAPI server
+    └── mcp/          # convert2md-mcp (PDF, DOCX, XLSX tools)
 
 src/docx2md/
 ├── domain/           # Entities, value objects, ports, use cases (no I/O deps)

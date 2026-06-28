@@ -2,21 +2,21 @@
 
 Run with uvx (stdio transport, no authentication)::
 
-    uvx --from "./[mcp]" pdf2md-mcp
+    uvx --from "./[mcp]" convert2md-mcp
 
 Or with an absolute path::
 
-    uvx --from "/path/to/convert-pdf-markdown[mcp]" pdf2md-mcp
+    uvx --from "/path/to/convert-pdf-markdown[mcp]" convert2md-mcp
 
 Cursor / Claude Desktop example (``mcp.json``)::
 
     {
       "mcpServers": {
-        "pdf2md": {
+        "convert2md": {
           "command": "uvx",
           "args": [
             "--from", "/path/to/convert-pdf-markdown[mcp]",
-            "pdf2md-mcp"
+            "convert2md-mcp"
           ]
         }
       }
@@ -54,7 +54,7 @@ from pdf2md.config.service_factory import build_default_service
 from pdf2md.domain.services.anchor_slug import AnchorSlug
 
 mcp = FastMCP(
-    name="pdf2md",
+    name="convert2md",
     instructions=(
         "Convert PDF, Word (.docx), and Excel (.xlsx) documents to structured "
         "Markdown with headings, images, tables, links, and code blocks."
@@ -317,7 +317,7 @@ def convert_xlsx_to_markdown(xlsx_path: str, output_path: str) -> str:
 
 
 def main() -> None:
-    """Entry point for ``pdf2md-mcp`` (stdio transport)."""
+    """Entry point for ``convert2md-mcp`` (stdio transport)."""
     mcp.run()
 
 

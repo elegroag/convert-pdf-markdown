@@ -9,7 +9,7 @@ El [MCP Inspector](https://github.com/modelcontextprotocol/inspector) abre una U
 ```bash
 # Desde la raíz del proyecto
 npx @modelcontextprotocol/inspector -- \
-  uvx --from "./[mcp]" pdf2md-mcp
+  uvx --from "./[mcp]" convert2md-mcp
 ```
 
 Equivalente con `uv run`:
@@ -17,7 +17,7 @@ Equivalente con `uv run`:
 ```bash
 uv sync --extra mcp
 npx @modelcontextprotocol/inspector -- \
-  uv run --extra mcp pdf2md-mcp
+  uv run --extra mcp convert2md-mcp
 ```
 
 Al ejecutar el comando, el inspector imprime dos URLs locales:
@@ -65,7 +65,7 @@ Crea `scripts/probe_mcp.py`:
 import json, subprocess, sys
 
 proc = subprocess.Popen(
-    ["uvx", "--from", "./[mcp]", "pdf2md-mcp"],
+    ["uvx", "--from", "./[mcp]", "convert2md-mcp"],
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     text=True,
@@ -112,11 +112,11 @@ Si el Inspector no conecta, lo más probable es el path. Usa rutas absolutas sie
 ```bash
 # ✅ Funciona
 npx @modelcontextprotocol/inspector -- \
-  uvx --from "/home/elegro/proyectos/python/convert-pdf-markdown[mcp]" pdf2md-mcp
+  uvx --from "/home/elegro/proyectos/python/convert-pdf-markdown[mcp]" convert2md-mcp
 
 # ⚠️ Falla si abres otra terminal en cwd distinto
 npx @modelcontextprotocol/inspector -- \
-  uvx --from "./[mcp]" pdf2md-mcp
+  uvx --from "./[mcp]" convert2md-mcp
 ```
 
 La opción `--from` con ruta absoluta es la recomendada para `mcp.json` y para el Inspector.
@@ -130,12 +130,12 @@ El servidor arranca bien por stdio. La clave es: el primer arranque tarda ~3-5 s
 ```json
 {
   "mcpServers": {
-    "pdf2md": {
+    "convert2md": {
       "command": "uvx",
       "args": [
         "--from",
         "/home/elegro/proyectos/python/convert-pdf-markdown[mcp]",
-        "pdf2md-mcp"
+        "convert2md-mcp"
       ]
     }
   }
@@ -149,7 +149,7 @@ La primera vez, `uvx` construye el sdist e instala dependencias. Eso tarda. Ejec
 ```bash
 # Fuerza la construcción y caché del entorno uvx
 uvx --from "/home/elegro/proyectos/python/convert-pdf-markdown[mcp]" \
-  pdf2md-mcp </dev/null >/dev/null 2>&1
+  convert2md-mcp </dev/null >/dev/null 2>&1
 ```
 
 Tras esto, los arranques siguientes son ~0.5s.
@@ -175,7 +175,7 @@ Si todavía falla, prueba a invocar el comando **exactamente** como lo haría Cu
 
 ```bash
 # Simula el arranque que hace Cursor
-uvx --from /home/elegro/proyectos/python/convert-pdf-markdown[mcp] pdf2md-mcp
+uvx --from /home/elegro/proyectos/python/convert-pdf-markdown[mcp] convert2md-mcp
 ```
 
 Si esto imprime el banner y se queda esperando en stdin, **funciona**. El problema en Cursor es otra cosa.
@@ -197,12 +197,12 @@ uv build
 ```json
 {
   "mcpServers": {
-    "pdf2md": {
+    "convert2md": {
       "command": "uvx",
       "args": [
         "--from",
         "/home/elegro/proyectos/python/convert-pdf-markdown/dist/pdf2md-0.1.0-py3-none-any.whl[fastmcp]",
-        "pdf2md-mcp"
+        "convert2md-mcp"
       ]
     }
   }
@@ -214,7 +214,7 @@ uv build
 ### Resumen del fix más probable
 
 1. Asegúrate de que `mcp.json` tiene **ruta absoluta** (no `./`).
-2. Ejecuta **una vez** `uvx --from ".../convert-pdf-markdown[mcp]" pdf2md-mcp` para cachear el entorno.
+2. Ejecuta **una vez** `uvx --from ".../convert-pdf-markdown[mcp]" convert2md-mcp` para cachear el entorno.
 3. Reinicia Cursor (la sesión MCP no se reconecta en caliente).
 4. Verifica en la bandeja de MCP que el servidor sale como `Connected` (no `Disconnected`).
 

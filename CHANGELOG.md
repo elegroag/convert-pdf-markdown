@@ -7,15 +7,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **MCP server renamed to `convert2md-mcp`** — reflects PDF, Word, and Excel
+  conversion. The entry point `pdf2md-mcp` remains as a deprecated alias.
+
 ### Added
 - **MCP tool `convert_xlsx_to_markdown`** — Excel (.xlsx) conversion exposed
   alongside `convert_pdf_to_markdown` and `convert_docx_to_markdown` in the
-  `pdf2md-mcp` server.
+  `convert2md-mcp` server.
 - **`xlsx2md` package** — Excel (.xlsx) to Markdown converter with Hexagonal
   Architecture parallel to `pdf2md` and `docx2md`.
 - **CLI `xlsx2md`** with `convert`, `batch`, and `version` subcommands.
 - **MCP tool `convert_docx_to_markdown`** — Word (.docx) conversion exposed
-  alongside `convert_pdf_to_markdown` in the `pdf2md-mcp` server.
+  alongside `convert_pdf_to_markdown` in the MCP server.
 - **`docx2md` package** — Word (.docx) to Markdown converter with Hexagonal
   Architecture parallel to `pdf2md`.
 - **CLI `docx2md`** with `convert`, `batch`, and `version` subcommands.

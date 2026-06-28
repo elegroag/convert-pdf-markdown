@@ -58,7 +58,8 @@ mcp = [
 
 [project.scripts]
 pdf2md = "pdf2md.interface.cli.app:app"
-pdf2md-mcp = "pdf2md.interface.mcp.server:main"
+convert2md-mcp = "pdf2md.interface.mcp.server:main"
+pdf2md-mcp = "pdf2md.interface.mcp.server:main"  # deprecated alias
 docx2md = "docx2md.interface.cli.app:main"
 xlsx2md = "xlsx2md.interface.cli.app:main"
 
