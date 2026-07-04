@@ -80,8 +80,13 @@ def convert(
     no_refine: bool = typer.Option(
         False, "--no-refine", help="Skip LibreOffice headless refinement"
     ),
-    output_docx_name: str = typer.Option(
-        "MANUAL_SISTEMA.docx", "--docx-name", help="Output DOCX filename"
+    keep_artifacts: bool = typer.Option(
+        False,
+        "--keep-artifacts",
+        help="Keep consolidated Markdown and intermediate files in the output directory",
+    ),
+    output_docx_name: str | None = typer.Option(
+        None, "--docx-name", help="Output DOCX filename (derived from source if omitted)"
     ),
     combined_md_name: str = typer.Option(
         "MANUAL_COMPLETO.md", "--md-name", help="Consolidated Markdown filename"
@@ -107,11 +112,19 @@ def convert(
         raise typer.Exit(code=1)
 
     consolidate = source_dir is not None and not no_consolidate
+
+    if output_docx_name is None:
+        if not consolidate and md is not None:
+            output_docx_name = f"{md.stem}.docx"
+        else:
+            output_docx_name = "MANUAL_SISTEMA.docx"
+
     cfg = ConversionConfig(
         consolidate=consolidate,
         insert_toc=not no_toc,
         clean_tables=not no_clean_tables,
         refine_with_libreoffice=not no_refine,
+        keep_artifacts=keep_artifacts,
         reference_docx=reference_docx,
         output_docx_name=output_docx_name,
         combined_md_name=combined_md_name,

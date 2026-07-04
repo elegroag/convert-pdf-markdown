@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import cast
 
 from loguru import logger
 
+from md2docx.domain.entities.entities import ConsolidatedManual
 from md2docx.domain.exceptions import (
     ConversionError,
     Md2DocxException,
@@ -153,36 +155,13 @@ class ConvertManualUseCase:
             if cfg.insert_toc:
                 manual = self._toc_inserter.insert(manual, config=cfg)
 
-            md_path = self._storage.save_manual(manual, output_dir, cfg)
-            reference_docx = (
-                cfg.reference_docx
-                if cfg.reference_docx is not None
-                else self._reference_builder.build(output_dir, cfg)
-            )
-
             slug = AnchorSlug.slugify(paths[0].stem)
-            intermediate_docx = output_dir / f"{slug}_intermediate.docx"
-            pandoc_out = self._pandoc_engine.convert(md_path, reference_docx, intermediate_docx)
-
-            refined = False
-            final_docx = pandoc_out
-            if cfg.refine_with_libreoffice:
-                try:
-                    final_docx = self._post_processor.refine(pandoc_out, output_dir)
-                    refined = True
-                except ConversionError as exc:
-                    logger.warning("LibreOffice refine skipped: {}", exc)
-                    final_docx = pandoc_out
-
-            docx_path = self._storage.save_docx(final_docx, output_dir, cfg)
-            elapsed = time.perf_counter() - start
-            return ConvertManualResult(
-                status="success",
-                docx_path=docx_path,
-                md_path=md_path,
-                sections=len(manual.sections),
-                refined=refined,
-                elapsed_seconds=elapsed,
+            return self._convert_manual(
+                manual=manual,
+                slug=slug,
+                output_dir=output_dir,
+                cfg=cfg,
+                start=start,
             )
         except (RenderingError, StorageError, ConversionError) as exc:
             return self._failure(exc, start)
@@ -202,6 +181,84 @@ class ConvertManualUseCase:
             error_message=str(exc),
         )
 
+    def _convert_manual(
+        self,
+        *,
+        manual: ConsolidatedManual,
+        slug: str,
+        output_dir: Path,
+        cfg: ConversionConfig,
+        start: float,
+    ) -> ConvertManualResult:
+        """Run pandoc/LibreOffice pipeline and persist only the final DOCX."""
+        if cfg.keep_artifacts:
+            md_path = self._storage.save_manual(manual, output_dir, cfg)
+            return self._run_pipeline(
+                md_path=md_path,
+                work_dir=output_dir,
+                slug=slug,
+                output_dir=output_dir,
+                cfg=cfg,
+                start=start,
+                sections=len(manual.sections),
+                saved_md_path=md_path,
+            )
+
+        with tempfile.TemporaryDirectory(prefix="md2docx-") as tmp:
+            work_dir = Path(tmp)
+            md_path = work_dir / "input.md"
+            md_path.write_text(manual.combined, encoding="utf-8")
+            return self._run_pipeline(
+                md_path=md_path,
+                work_dir=work_dir,
+                slug=slug,
+                output_dir=output_dir,
+                cfg=cfg,
+                start=start,
+                sections=len(manual.sections),
+                saved_md_path=None,
+            )
+
+    def _run_pipeline(
+        self,
+        *,
+        md_path: Path,
+        work_dir: Path,
+        slug: str,
+        output_dir: Path,
+        cfg: ConversionConfig,
+        start: float,
+        sections: int,
+        saved_md_path: Path | None,
+    ) -> ConvertManualResult:
+        reference_docx = (
+            cfg.reference_docx
+            if cfg.reference_docx is not None
+            else self._reference_builder.build(output_dir, cfg)
+        )
+        intermediate_docx = work_dir / f"{slug}_intermediate.docx"
+        pandoc_out = self._pandoc_engine.convert(md_path, reference_docx, intermediate_docx)
+
+        refined = False
+        final_docx = pandoc_out
+        if cfg.refine_with_libreoffice:
+            try:
+                final_docx = self._post_processor.refine(pandoc_out, work_dir)
+                refined = True
+            except ConversionError as exc:
+                logger.debug("LibreOffice refine skipped: {}", exc)
+                final_docx = pandoc_out
+
+        docx_path = self._storage.save_docx(final_docx, output_dir, cfg)
+        elapsed = time.perf_counter() - start
+        return ConvertManualResult(
+            status="success",
+            docx_path=docx_path,
+            md_path=saved_md_path,
+            sections=sections,
+            refined=refined,
+            elapsed_seconds=elapsed,
+        )
 
 class BatchConvertUseCase:
     """Convert every Markdown file in a directory."""

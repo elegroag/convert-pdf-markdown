@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from docx import Document
@@ -11,15 +12,22 @@ from md2docx.domain.ports.ports import IReferenceDocxBuilder
 from md2docx.domain.value_objects.value_objects import ConversionConfig
 
 
+def _reference_cache_dir() -> Path:
+    cache_home = os.environ.get("XDG_CACHE_HOME")
+    if cache_home:
+        return Path(cache_home) / "md2docx"
+    return Path.home() / ".cache" / "md2docx"
+
+
 class DocxStyleBuilder(IReferenceDocxBuilder):
     """Create or reuse a reference DOCX for pandoc."""
 
     def build(self, output_dir: Path, config: ConversionConfig) -> Path:
-        """Return a cached reference DOCX under ``output_dir/_template``."""
+        """Return a cached reference DOCX under the user cache directory."""
         if config.reference_docx is not None and config.reference_docx.is_file():
             return config.reference_docx
 
-        template_dir = output_dir / "_template"
+        template_dir = _reference_cache_dir()
         template_dir.mkdir(parents=True, exist_ok=True)
         reference_path = template_dir / "reference.docx"
         if reference_path.is_file():

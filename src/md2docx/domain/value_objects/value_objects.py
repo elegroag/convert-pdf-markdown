@@ -19,6 +19,7 @@ class ConversionConfig:
     insert_toc: bool = True
     clean_tables: bool = True
     refine_with_libreoffice: bool = True
+    keep_artifacts: bool = False
     reference_docx: Path | None = None
     section_delimiter: str = "=" * 60
     combined_md_name: str = "MANUAL_COMPLETO.md"
@@ -35,6 +36,7 @@ class ConversionConfig:
             "insert_toc": self.insert_toc,
             "clean_tables": self.clean_tables,
             "refine_with_libreoffice": self.refine_with_libreoffice,
+            "keep_artifacts": self.keep_artifacts,
             "reference_docx": str(self.reference_docx) if self.reference_docx else None,
             "section_delimiter": self.section_delimiter,
             "combined_md_name": self.combined_md_name,
@@ -54,6 +56,7 @@ class ConversionConfig:
             insert_toc=bool(data.get("insert_toc", True)),
             clean_tables=bool(data.get("clean_tables", True)),
             refine_with_libreoffice=bool(data.get("refine_with_libreoffice", True)),
+            keep_artifacts=bool(data.get("keep_artifacts", False)),
             reference_docx=Path(ref) if ref else None,
             section_delimiter=str(data.get("section_delimiter", "=" * 60)),
             combined_md_name=str(data.get("combined_md_name", "MANUAL_COMPLETO.md")),

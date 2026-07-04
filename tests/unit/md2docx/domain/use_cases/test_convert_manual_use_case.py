@@ -50,7 +50,7 @@ class TestConvertManualUseCase:
             ConvertManualRequest(
                 md_path=md,
                 output_dir=out_dir,
-                config=ConversionConfig(consolidate=False),
+                config=ConversionConfig(consolidate=False, keep_artifacts=True),
             )
         )
 
@@ -59,6 +59,53 @@ class TestConvertManualUseCase:
         consolidator.consolidate.assert_called_once()
         pandoc_engine.convert.assert_called_once()
         post_processor.refine.assert_called_once()
+        storage.save_manual.assert_called_once()
+        storage.save_docx.assert_called_once()
+
+    def test_default_skips_persisted_markdown(self, tmp_path: Path) -> None:
+        md = tmp_path / "manual.md"
+        md.write_text("# Manual\n\nBody", encoding="utf-8")
+        out_dir = tmp_path / "out"
+
+        consolidator = MagicMock()
+        consolidator.consolidate.return_value = ConsolidatedManual(
+            combined="# Manual\n\nBody",
+            sections=[],
+        )
+        table_cleaner = MagicMock()
+        table_cleaner.clean.side_effect = lambda manual, **_: manual
+        toc_inserter = MagicMock()
+        toc_inserter.insert.side_effect = lambda manual, **_: manual
+        reference_builder = MagicMock()
+        reference_builder.build.return_value = tmp_path / "ref.docx"
+        pandoc_engine = MagicMock()
+        intermediate = tmp_path / "manual_intermediate.docx"
+        pandoc_engine.convert.return_value = intermediate
+        post_processor = MagicMock()
+        post_processor.refine.return_value = intermediate
+        storage = MagicMock()
+        storage.save_docx.return_value = out_dir / "MANUAL_SISTEMA.docx"
+
+        use_case = ConvertManualUseCase(
+            consolidator=consolidator,
+            table_cleaner=table_cleaner,
+            toc_inserter=toc_inserter,
+            reference_builder=reference_builder,
+            pandoc_engine=pandoc_engine,
+            post_processor=post_processor,
+            storage=storage,
+        )
+        result = use_case.execute(
+            ConvertManualRequest(
+                md_path=md,
+                output_dir=out_dir,
+                config=ConversionConfig(consolidate=False),
+            )
+        )
+
+        assert result.status == "success"
+        assert result.md_path is None
+        storage.save_manual.assert_not_called()
         storage.save_docx.assert_called_once()
 
     def test_pandoc_error_returns_failure(self, tmp_path: Path) -> None:
@@ -76,7 +123,6 @@ class TestConvertManualUseCase:
         pandoc_engine = MagicMock()
         pandoc_engine.convert.side_effect = PandocNotFoundError("missing")
         storage = MagicMock()
-        storage.save_manual.return_value = tmp_path / "MANUAL_COMPLETO.md"
 
         use_case = ConvertManualUseCase(
             consolidator=consolidator,
