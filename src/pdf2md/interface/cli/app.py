@@ -27,7 +27,7 @@ from pdf2md import __version__
 from pdf2md.application.dto.dtos import ConversionRequest
 from pdf2md.config.config_loader import load_batch_config, load_config
 from pdf2md.config.service_factory import build_batch_use_case, build_default_service
-from pdf2md.domain.value_objects.enums import HeadingStyle, TableEngine
+from pdf2md.domain.value_objects.enums import ExtractorEngine, HeadingStyle, TableEngine
 from pdf2md.domain.value_objects.value_objects import (
     BatchConfig,
     ConversionConfig,
@@ -57,6 +57,15 @@ def version() -> None:
     typer.echo(f"pdf2md {__version__}")
 
 
+def _parse_extractor_engine(value: str) -> ExtractorEngine:
+    try:
+        return ExtractorEngine(value)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"invalid extractor {value!r}; expected pymupdf|pdfplumber"
+        ) from exc
+
+
 @app.command()
 def convert(
     pdf: Path = typer.Argument(..., exists=True, readable=True, help="PDF file"),
@@ -74,6 +83,9 @@ def convert(
     ),
     pages: Optional[str] = typer.Option(
         None, "--pages", help="Page range, e.g. 1-50 or 1,3,5"
+    ),
+    password: Optional[str] = typer.Option(
+        None, "--password", help="Password for encrypted PDFs"
     ),
     no_images: bool = typer.Option(False, "--no-images", help="Skip image extraction"),
     no_links: bool = typer.Option(False, "--no-links", help="Skip link extraction"),
@@ -100,10 +112,20 @@ def convert(
         heading_style=base_config.heading_style,
         code_fence=base_config.code_fence,
         assets_subdir=base_config.assets_subdir,
+        emit_link_list=base_config.emit_link_list,
+        password=password or base_config.password,
+        pages_filter=pages or base_config.pages_filter,
+        extractor_engine=_parse_extractor_engine(extractor),
+        batch_executor=base_config.batch_executor,
     )
 
     service = build_default_service(output_dir=output, config=cfg)
-    request = ConversionRequest(pdf_path=pdf, output_dir=output, config=cfg)
+    request = ConversionRequest(
+        pdf_path=pdf,
+        output_dir=output,
+        config=cfg,
+        password=cfg.password,
+    )
     result = service.convert(request)
 
     if result.status == "success":
@@ -128,6 +150,12 @@ def batch(
         Path("./output"), "--output", "-o", help="Output directory"
     ),
     workers: int = typer.Option(2, "--workers", "-w", min=1, help="Worker threads"),
+    executor: str = typer.Option(
+        "thread", "--executor", help="Batch executor: thread|process"
+    ),
+    pages: Optional[str] = typer.Option(
+        None, "--pages", help="Page range applied to every PDF in the batch"
+    ),
     skip_on_error: bool = typer.Option(
         True, "--skip-on-error/--no-skip-on-error", help="Continue batch on failure"
     ),
@@ -141,14 +169,31 @@ def batch(
     _setup_logging(verbose)
 
     base_config = load_batch_config(config_path)
+    merged_config = ConversionConfig(
+        image_min_size=base_config.config.image_min_size,
+        extract_tables=base_config.config.extract_tables,
+        table_extractor=base_config.config.table_extractor,
+        extract_links=base_config.config.extract_links,
+        frontmatter=base_config.config.frontmatter,
+        extract_images=base_config.config.extract_images,
+        heading_style=base_config.config.heading_style,
+        code_fence=base_config.config.code_fence,
+        assets_subdir=base_config.config.assets_subdir,
+        emit_link_list=base_config.config.emit_link_list,
+        password=base_config.config.password,
+        pages_filter=pages or base_config.config.pages_filter,
+        extractor_engine=base_config.extractor,
+        batch_executor=executor,
+    )
     batch_cfg = BatchConfig(
         workers=workers,
         skip_on_error=skip_on_error,
         report_file=str(report_file),
+        pages_filter=pages or base_config.pages_filter,
         extractor=base_config.extractor,
-        config=base_config.config,
+        config=merged_config,
     )
-    use_case = build_batch_use_case(output_dir=output, config=batch_cfg.config)
+    use_case = build_batch_use_case(output_dir=output, config=merged_config)
     report = use_case.execute(directory, batch_cfg)
 
     report_file.write_text(report.to_json(), encoding="utf-8")

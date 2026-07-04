@@ -7,6 +7,7 @@ a :class:`PdfDocument` with pages, text, blocks, images, and metadata.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 from pathlib import Path
@@ -34,10 +35,10 @@ from pdf2md.domain.ports.ports import (
     ILinkExtractor,
     ITableExtractor,
 )
+from pdf2md.domain.services.column_reorderer import ColumnReorderer
 from pdf2md.domain.value_objects.enums import (
     BlockType,
     ExtractorEngine,
-    TableEngine,
 )
 from pdf2md.domain.value_objects.value_objects import (
     ContentBlock,
@@ -147,47 +148,58 @@ class PyMuPdfExtractor(IExtractor):
         if not path.is_file():
             raise CorruptedPdfError(f"PDF not found: {path}")
 
+        password = self._config.password or ""
+        page_filter = self._config.pages_filter
+
+        table_extractor = self._table_extractor
+        begin_doc = getattr(table_extractor, "begin_document", None)
+        end_doc = getattr(table_extractor, "end_document", None)
+        if callable(begin_doc):
+            begin_doc(path)
+
         try:
             with fitz.open(path) as doc:
                 if doc.is_encrypted:
-                    if not doc.authenticate(""):
+                    if not doc.authenticate(password):
                         raise EncryptedPdfError(
                             f"PDF is password-protected: {path}"
                         )
                 metadata = self._extract_metadata(doc)
+                page_indices = self._page_indices(doc.page_count, page_filter)
                 pages: list[PdfPage] = []
-                raw_by_page: list[list[dict[str, Any]]] = []
-                page_widths: list[float] = []
-                for index in range(doc.page_count):
+
+                for index in page_indices:
                     raw_page = doc.load_page(index)
                     page = PdfPage(page_number=index + 1)
                     page.raw_text = raw_page.get_text("text") or ""
                     raw_blocks, page_width = self._parse_raw_blocks(
                         raw_page, page.raw_text
                     )
-                    raw_by_page.append(raw_blocks)
-                    page_widths.append(page_width)
-                    pages.append(page)
-
-                document_body_size = self._body_size_from_raw(
-                    [block for page_blocks in raw_by_page for block in page_blocks]
-                )
-
-                for index, page in enumerate(pages):
-                    page.blocks = self._classify_blocks(
-                        raw_by_page[index],
-                        body_size=document_body_size,
-                        page_width=page_widths[index],
+                    page.page_width = page_width
+                    document_body_size = self._body_size_from_raw(raw_blocks)
+                    page.blocks = ColumnReorderer.reorder(
+                        self._classify_blocks(
+                            raw_blocks,
+                            body_size=document_body_size,
+                            page_width=page_width,
+                        ),
+                        page_width=page_width,
                     )
-                    raw_page = doc.load_page(index)
                     if self._config.extract_images:
                         page.images = self._safe_extract_images(raw_page)
-                    if self._config.extract_tables and self._table_extractor:
+                    if self._config.extract_tables and table_extractor:
                         try:
-                            page.tables = self._table_extractor.extract_tables(
-                                path, index + 1
-                            )
+                            page.tables = [
+                                table
+                                for table in table_extractor.extract_tables(
+                                    path, index + 1
+                                )
+                                if self._table_is_plausible(
+                                    table, page.page_width, raw_page.rect.height
+                                )
+                            ]
                         except TableExtractionError as exc:
+                            page.table_extraction_failed = True
                             logger.warning(
                                 "table extraction failed on page {}: {}",
                                 index + 1,
@@ -199,11 +211,13 @@ class PyMuPdfExtractor(IExtractor):
                         )
                     if self._config.extract_links:
                         page.links = self._safe_extract_links(raw_page, index + 1)
+                    pages.append(page)
+
                 if self._config.extract_images:
                     self._deduplicate_images(pages)
                 return PdfDocument(
                     file_path=path,
-                    page_count=doc.page_count,
+                    page_count=len(pages),
                     metadata=metadata,
                     pages=pages,
                 )
@@ -215,27 +229,25 @@ class PyMuPdfExtractor(IExtractor):
             raise ExtractionError(
                 f"failed to extract {path}: {exc}"
             ) from exc
+        finally:
+            if callable(end_doc):
+                end_doc()
 
     # ------------------------------------------------------------------
     # Public adapter surface
     # ------------------------------------------------------------------
 
     def extract_images(self, page: PdfPage) -> list[ImageAsset]:  # type: ignore[override]
-        """Re-extract images from a page object.
-
-        Useful when the extractor is used as an :class:`IImageExtractor`.
-        """
-        path = page  # type: ignore[assignment]
-        if not hasattr(path, "raw_text"):
-            return []
-        return self._safe_extract_images(path)  # type: ignore[arg-type]
+        """Re-extract images from a page object."""
+        return list(page.images)
 
     def extract_links(self, pdf_path: Path) -> list[Link]:  # type: ignore[override]
         """Extract every link from a PDF file."""
         out: list[Link] = []
+        password = self._config.password or ""
         try:
             with fitz.open(pdf_path) as doc:
-                if doc.is_encrypted and not doc.authenticate(""):
+                if doc.is_encrypted and not doc.authenticate(password):
                     raise EncryptedPdfError(f"encrypted PDF: {pdf_path}")
                 for index in range(doc.page_count):
                     page = doc.load_page(index)
@@ -245,6 +257,24 @@ class PyMuPdfExtractor(IExtractor):
         except Exception as exc:  # noqa: BLE001
             raise ExtractionError(f"failed to read links from {pdf_path}") from exc
         return out
+
+    @staticmethod
+    def _page_indices(page_count: int, page_filter: str | None) -> list[int]:
+        if not page_filter:
+            return list(range(page_count))
+        wanted: set[int] = set()
+        for chunk in page_filter.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            if "-" in chunk:
+                start_s, end_s = chunk.split("-", 1)
+                start = int(start_s)
+                end = int(end_s) if end_s else page_count
+                wanted.update(range(start, end + 1))
+            else:
+                wanted.add(int(chunk))
+        return sorted(i for i in range(page_count) if (i + 1) in wanted)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -493,16 +523,31 @@ class PyMuPdfExtractor(IExtractor):
     @staticmethod
     def _deduplicate_images(pages: list[PdfPage]) -> None:
         """Remove duplicate images across all pages (content-hash based)."""
-        seen: set[int] = set()
+        seen: set[str] = set()
         for page in pages:
             keep: list[ImageAsset] = []
             for img in page.images:
-                h = hash(img.raw_bytes)
-                if h in seen:
+                digest = hashlib.md5(img.raw_bytes).hexdigest()
+                if digest in seen:
                     continue
-                seen.add(h)
+                seen.add(digest)
                 keep.append(img)
             page.images = keep
+
+    @staticmethod
+    def _table_is_plausible(
+        table: TableNode,
+        page_width: float,
+        page_height: float,
+    ) -> bool:
+        """Reject tables whose bbox covers most of the page (stream false positives)."""
+        x0, y0, x1, y1 = table.bbox
+        if x1 <= x0 or y1 <= y0:
+            return True
+        if page_width <= 0 or page_height <= 0:
+            return True
+        coverage = ((x1 - x0) * (y1 - y0)) / (page_width * page_height)
+        return coverage <= 0.55
 
     @staticmethod
     def _filter_table_blocks(
@@ -544,6 +589,8 @@ class PyMuPdfExtractor(IExtractor):
             if xref in seen_xrefs:
                 continue
             seen_xrefs.add(xref)
+            rects = raw_page.get_image_rects(xref) or []
+            bbox = self._image_bbox(rects)
             try:
                 pix = fitz.Pixmap(raw_page.parent, xref)
             except Exception:  # noqa: BLE001
@@ -556,10 +603,12 @@ class PyMuPdfExtractor(IExtractor):
                 if pix.colorspace and pix.colorspace.name not in ("DeviceRGB", "DeviceGray"):
                     pix = fitz.Pixmap(fitz.csRGB, pix)
                 raw_bytes = pix.tobytes(ext)
+                if bbox is None:
+                    bbox = (0.0, 0.0, float(pix.width), float(pix.height))
                 yield ImageAsset(
                     image_id=f"p{raw_page.number + 1}_img{img_index}",
                     page_number=raw_page.number + 1,
-                    bbox=(0.0, 0.0, float(pix.width), float(pix.height)),
+                    bbox=bbox,
                     format=ext.upper(),
                     raw_bytes=raw_bytes,
                 )
@@ -569,18 +618,36 @@ class PyMuPdfExtractor(IExtractor):
             finally:
                 pix = None
 
+    @staticmethod
+    def _image_bbox(
+        rects: list[Any],
+    ) -> tuple[float, float, float, float] | None:
+        if not rects:
+            return None
+        x0 = min(float(r.x0) for r in rects)
+        y0 = min(float(r.y0) for r in rects)
+        x1 = max(float(r.x1) for r in rects)
+        y1 = max(float(r.y1) for r in rects)
+        return (x0, y0, x1, y1)
+
     def _safe_extract_links(self, raw_page: Any, page_number: int) -> list[Link]:
         out: list[Link] = []
         try:
             for link in raw_page.get_links() or []:
                 kind = link.get("kind")
+                bbox = self._link_bbox(link)
                 if kind == fitz.LINK_URI:  # type: ignore[attr-defined]
                     url = str(link.get("uri") or "")
                     if not url:
                         continue
                     text = self._link_text(raw_page, link)
                     out.append(
-                        Link(url=url, text=text, page_number=page_number)
+                        Link(
+                            url=url,
+                            text=text,
+                            page_number=page_number,
+                            bbox=bbox,
+                        )
                     )
                 elif kind == fitz.LINK_GOTO:  # type: ignore[attr-defined]
                     page = link.get("page", -1)
@@ -593,11 +660,24 @@ class PyMuPdfExtractor(IExtractor):
                             text=text,
                             page_number=page_number,
                             is_internal=True,
+                            bbox=bbox,
                         )
                     )
         except Exception as exc:  # noqa: BLE001
             logger.warning("link extraction failed on page {}: {}", page_number, exc)
         return out
+
+    @staticmethod
+    def _link_bbox(link: dict) -> tuple[float, float, float, float] | None:
+        rect = link.get("from")
+        if rect is None:
+            return None
+        try:
+            return (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+        except AttributeError:
+            if isinstance(rect, (list, tuple)) and len(rect) == 4:
+                return (float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
+        return None
 
     @staticmethod
     def _link_text(raw_page: Any, link: dict) -> str:
@@ -617,16 +697,3 @@ __all__ = ["PyMuPdfExtractor"]
 
 # Backward-compatible alias for the previous camel case used in the spec.
 PymupdfExtractor = PyMuPdfExtractor
-
-
-def build_default_table_extractor(
-    engine: TableEngine,
-    *,
-    table_settings: dict | None = None,
-) -> ITableExtractor:
-    """Construct the default :class:`ITableExtractor` for ``engine``."""
-    from pdf2md.infrastructure.extractors.pdfplumber_extractor import (
-        PdfplumberTableExtractor,
-    )
-
-    return PdfplumberTableExtractor(table_settings=table_settings or {})

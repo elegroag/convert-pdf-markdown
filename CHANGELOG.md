@@ -12,6 +12,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   conversion. The entry point `pdf2md-mcp` remains as a deprecated alias.
 
 ### Added
+- **`md2docx` package** — Markdown to Word (.docx) converter with Hexagonal
+  Architecture parallel to `pdf2md`, `docx2md`, and `xlsx2md`.
+- **CLI `md2docx`** with `convert`, `batch`, and `version` subcommands.
+- **MCP tool `convert_markdown_to_docx`** — Markdown → DOCX generation in
+  the `convert2md-mcp` server.
+- **Pipeline**: consolidate Markdown sources, insert TOC, clean ASCII-art
+  tables, convert via pandoc with Calibri reference template, optional
+  LibreOffice headless refinement.
+- **Tests**: unit tests under `tests/unit/md2docx/`.
 - **MCP tool `convert_xlsx_to_markdown`** — Excel (.xlsx) conversion exposed
   alongside `convert_pdf_to_markdown` and `convert_docx_to_markdown` in the
   `convert2md-mcp` server.

@@ -1,7 +1,7 @@
-# PDF2MD / DOCX2MD / XLSX2MD Converter
+# PDF2MD / DOCX2MD / XLSX2MD / MD2DOCX Converter
 
 Convierte libros y documentos **PDF**, **Word (.docx)** y **Excel (.xlsx)** a Markdown
-estructurado, preservando jerarquía de encabezados, imágenes, tablas, enlaces y bloques de código.
+estructurado, y genera **Word (.docx)** desde manuales Markdown consolidados.
 
 Construido con **Arquitectura Hexagonal (Ports & Adapters)**: el dominio
 no depende de ninguna librería externa; los adaptadores de infraestructura
@@ -93,10 +93,35 @@ xlsx2md version
 La salida se organiza en `<output>/<slug>/` con un archivo por hoja, un `_index.md`
 opcional y las imágenes en `assets/`.
 
+## MD2DOCX (Markdown → Word)
+
+Requiere **pandoc** en `PATH`. **LibreOffice** es opcional para refinar el `.docx` final.
+
+```bash
+# Conversión simple
+md2docx convert manual.md -o ./output
+
+# Consolidar varios Markdown de un directorio
+md2docx convert manual.md -o ./output --source-dir ./secciones
+
+# Sin refinado LibreOffice (solo pandoc + plantilla Calibri)
+md2docx convert manual.md -o ./output --no-refine
+
+# Batch processing
+md2docx batch ./manuales/ -o ./markdowns/ --workers 2
+
+# Versión
+md2docx version
+```
+
+La salida incluye `MANUAL_COMPLETO.md` (Markdown consolidado) y
+`MANUAL_SISTEMA.docx` (documento Word).
+
 ## Servidor MCP
 
 El servidor MCP expone las tools `convert_pdf_to_markdown`,
-`convert_docx_to_markdown` y `convert_xlsx_to_markdown` a clientes MCP como
+`convert_docx_to_markdown`, `convert_xlsx_to_markdown` y
+`convert_markdown_to_docx` a clientes MCP como
 **Cursor** o **Claude Desktop**. No requiere autenticación; se comunica por stdio.
 
 ### Instalación y ejecución con uvx
@@ -187,7 +212,7 @@ Cuando `output_path` es un directorio, el archivo se nombra desde el stem del DO
 }
 ```
 
-En caso de error, las tres tools incluyen `error` y `error_message`.
+En caso de error, las cuatro tools incluyen `error` y `error_message`.
 
 **`convert_xlsx_to_markdown`**
 
@@ -214,6 +239,30 @@ opcional. Las imágenes van a `assets/` dentro de esa carpeta.
   "total_rows": 120,
   "total_images": 3,
   "elapsed_seconds": 0.45
+}
+```
+
+**`convert_markdown_to_docx`**
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `md_path` | Ruta al Markdown de entrada (`.md`) |
+| `output_path` | Directorio de salida **o** ruta completa al `.docx` |
+
+Cuando `output_path` es un directorio, el archivo se nombra desde el stem del Markdown
+(`manual.md` → `manual.docx`). También se escribe `MANUAL_COMPLETO.md` en el directorio
+de salida. Requiere **pandoc** en PATH; LibreOffice es opcional para refinado del `.docx`.
+
+**Respuesta** (JSON):
+
+```json
+{
+  "status": "success",
+  "docx_path": "/output/manual.docx",
+  "md_path": "/output/MANUAL_COMPLETO.md",
+  "sections": 1,
+  "refined": true,
+  "elapsed_seconds": 2.15
 }
 ```
 

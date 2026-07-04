@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pdf2md.domain.services.block_key import block_position_key
 from pdf2md.domain.services.heading_inferer import HeadingInferer
 from pdf2md.domain.value_objects.enums import BlockType
 
@@ -19,17 +20,24 @@ class TestSimplePdfExtraction:
     def test_heading_inference(self, pdf_path, full_extractor) -> None:
         doc = full_extractor.extract(pdf_path("simple.pdf"))
         levels = HeadingInferer.infer_levels(doc)
-        # v0.2.0 contract: keys are normalised block text, not font sizes.
-        # The simple.pdf fixture has explicit H1, H2, H3 chapters.
-        assert levels.get("Chapter One: Introduction") == 1
-        assert levels.get("1.1 Background") == 2
-        assert levels.get("1.1.1 Historical note") == 3
+        page1 = doc.pages[0]
+        chapter = next(
+            b for b in page1.blocks if b.text.strip() == "Chapter One: Introduction"
+        )
+        background = next(b for b in page1.blocks if b.text.strip() == "1.1 Background")
+        note = next(
+            b for b in page1.blocks if b.text.strip() == "1.1.1 Historical note"
+        )
+        assert levels[block_position_key(1, chapter)] == 1
+        assert levels[block_position_key(1, background)] == 2
+        assert levels[block_position_key(1, note)] == 3
 
     def test_body_text_not_a_heading(self, pdf_path, full_extractor) -> None:
         doc = full_extractor.extract(pdf_path("simple.pdf"))
         levels = HeadingInferer.infer_levels(doc)
-        # Body sentences must not appear as keys.
-        assert "This is the body of the first chapter" not in levels
+        assert not any(
+            key.endswith("This is the body of the first chapter") for key in levels
+        )
 
     def test_list_items_detected_on_page_1(self, pdf_path, full_extractor) -> None:
         doc = full_extractor.extract(pdf_path("simple.pdf"))

@@ -93,6 +93,16 @@ def build_config(toml_data: dict[str, Any]) -> ConversionConfig:
             f"invalid heading_style {raw_heading!r}; expected atx|setext"
         ) from exc
 
+    raw_extractor = str(extractor.get("engine", "pymupdf"))
+    try:
+        extractor_engine = ExtractorEngine(raw_extractor)
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"invalid extractor.engine {raw_extractor!r}"
+        ) from exc
+
+    batch = toml_data.get("batch", {}) or {}
+
     return ConversionConfig(
         image_min_size=int(images.get("min_size_px", 200)),
         extract_tables=bool(extractor.get("engine", "pymupdf")) != "pdfplumber"
@@ -104,6 +114,11 @@ def build_config(toml_data: dict[str, Any]) -> ConversionConfig:
         heading_style=heading_style,
         code_fence=str(output.get("code_fence", "```")),
         assets_subdir=str(images.get("assets_subdir", "assets")),
+        emit_link_list=bool(output.get("emit_link_list", False)),
+        password=str(extractor.get("password") or "") or None,
+        pages_filter=str(batch.get("pages_filter") or "") or None,
+        extractor_engine=extractor_engine,
+        batch_executor=str(batch.get("executor", "thread")),
     )
 
 
@@ -127,6 +142,7 @@ def build_batch_config(toml_data: dict[str, Any]) -> BatchConfig:
         workers=workers,
         skip_on_error=bool(batch.get("skip_on_error", True)),
         report_file=str(batch.get("report_file", "batch_report.json")),
+        pages_filter=str(batch.get("pages_filter") or "") or None,
         extractor=extractor,
         config=build_config(toml_data),
     )

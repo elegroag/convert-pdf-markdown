@@ -44,10 +44,12 @@ archivos; sólo interactúa con abstracciones (`IExtractor`, `IRenderer`,
 ┌─────────────────────────────────────────────────────────────┐
 │  4. Infrastructure (adaptadores hacia el exterior)           │
 │     - Extractors: PyMuPdfExtractor, PdfplumberTableExtractor,│
-│                   CamelotTableExtractor (opcional)            │
+│                   CamelotTableExtractor (opcional),           │
+│                   CompositeTableExtractor,                    │
+│                   table_extractor_factory                     │
 │     - Renderers: MarkdownRenderer, HtmlRenderer               │
 │     - Storage: FileStorage, InMemoryStorage,                  │
-│                ThreadPoolBatchRunner                          │
+│                ThreadPoolBatchRunner, ProcessPoolBatchRunner  │
 │     - Config: TomlConfigLoader, helpers funcionales, factory  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -80,9 +82,16 @@ archivos; sólo interactúa con abstracciones (`IExtractor`, `IRenderer`,
 
 - **`AnchorSlug`** — Genera slugs GitHub-style. Usado por
   `FileStorage` (nombres de archivo) y por el renderer (anclas).
-- **`HeadingInferer`** — Recorre todas las páginas de un `PdfDocument`
-  y devuelve un mapa `font_size → nivel (1-3)` basado en la frecuencia
-  de tamaños de fuente.
+- **`HeadingInferer`** — Analiza bloques con scoring multi-señal (tamaño,
+  negrita, longitud, mayúsculas) y devuelve un mapa
+  ``{position_key: nivel}`` donde la clave combina página, coordenada Y
+  y texto del bloque.
+- **`ColumnReorderer`** — Detecta layouts de dos columnas y reordena
+  bloques para lectura natural (columna izquierda, luego derecha).
+- **`reading_order.build_reading_order`** — Intercala texto, tablas e
+  imágenes por coordenada Y antes del renderizado.
+- **`inline_links.apply_inline_links`** — Inserta enlaces Markdown
+  inline cuando el texto del enlace aparece en un párrafo.
 - **`FrontmatterBuilder`** — Convierte un `PdfMetadata` + page_count
   en un bloque YAML.
 
@@ -110,3 +119,25 @@ diferentes (e.g. S3Storage, un extractor propio) sin tocar el dominio.
 
 Pirámide objetivo: ≥ 90 % unit, ≥ 70 % integración. La cobertura
 actual es 86 % total con 100 % en la capa de dominio.
+
+## MD2DOCX — Markdown → Word
+
+El paquete `md2docx` sigue la misma arquitectura hexagonal que
+`pdf2md`, `docx2md` y `xlsx2md`.
+
+```
+Markdown (.md) ──► ManualConsolidator ──► TableCleaner ──► TocInserter
+       │                                              │
+       ▼                                              ▼
+  FileStorage (MANUAL_COMPLETO.md)          PandocEngine (+ reference.docx)
+       │                                              │
+       ▼                                              ▼
+  MANUAL_SISTEMA.docx ◄── LibreOfficePostProcessor (opcional)
+```
+
+Puertos clave: `IManualConsolidator`, `ITocInserter`, `ITableCleaner`,
+`IMarkdownToDocxEngine`, `IDocxPostProcessor`, `IReferenceDocxBuilder`,
+`IStorage`.
+
+Dependencias externas detectadas en runtime: `pandoc` (obligatorio),
+`libreoffice` (opcional, refinado).

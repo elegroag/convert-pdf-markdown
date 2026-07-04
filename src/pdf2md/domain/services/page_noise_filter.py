@@ -1,9 +1,4 @@
-"""PageNoiseFilter — removes recurring headers, footers, and page numbers.
-
-Government and Word-generated PDFs often repeat institutional footers
-and bare page numbers on every page.  Filtering them before paragraph
-joining keeps the Markdown output readable.
-"""
+"""PageNoiseFilter — removes recurring headers, footers, and page numbers."""
 
 from __future__ import annotations
 
@@ -17,6 +12,8 @@ _FOOTER_RE = re.compile(
 )
 _PAGE_NUM_ONLY_RE = re.compile(r"^\d{1,3}$")
 _ELABORO_RE = re.compile(r"^\d{1,3}\s+Elaboró:", re.IGNORECASE)
+_PAGE_OF_RE = re.compile(r"^\s*(?:page|página|pag\.?)\s+\d+\s*(?:of|de|/)\s*\d+\s*$", re.IGNORECASE)
+_SHORT_HEADER_RE = re.compile(r"^\s*(?:chapter|capítulo|section|sección)\s+\d+\s*$", re.IGNORECASE)
 
 
 class PageNoiseFilter:
@@ -38,6 +35,16 @@ class PageNoiseFilter:
             return True
         if _ELABORO_RE.match(text):
             return True
+        if _PAGE_OF_RE.match(text):
+            return True
+        if block.bbox:
+            _, y0, _, y1 = block.bbox
+            if _SHORT_HEADER_RE.match(text) and (y1 <= 72 or y0 >= 720):
+                return True
+            if y1 <= 72 and len(text.split()) <= 6:
+                return True
+            if y0 >= 720 and len(text.split()) <= 8:
+                return True
         return False
 
 

@@ -1,5 +1,8 @@
 El servidor arranca correctamente con `uvx`. Te explico las tres formas de probarlo.
 
+Las cuatro tools disponibles son: `convert_pdf_to_markdown`, `convert_docx_to_markdown`,
+`convert_xlsx_to_markdown` y `convert_markdown_to_docx`.
+
 ## 1. MCP Inspector (la herramienta oficial)
 
 El [MCP Inspector](https://github.com/modelcontextprotocol/inspector) abre una UI web que arranca tu servidor como subproceso, lista las tools y te permite invocarlas. No requiere instalar nada globalmente.
@@ -28,8 +31,8 @@ Al ejecutar el comando, el inspector imprime dos URLs locales:
 En la UI:
 
 1. Pulsa **Connect** (no hay autenticación).
-2. Ve a la pestaña **Tools** → `convert_pdf_to_markdown`, `convert_docx_to_markdown`
-   o `convert_xlsx_to_markdown`.
+2. Ve a la pestaña **Tools** → `convert_pdf_to_markdown`, `convert_docx_to_markdown`,
+   `convert_xlsx_to_markdown` o `convert_markdown_to_docx`.
 3. Rellena los argumentos:
    ```json
    {
@@ -42,6 +45,13 @@ En la UI:
    {
      "xlsx_path": "/ruta/a/libro.xlsx",
      "output_path": "/tmp/xlsx2md-inspector-test"
+   }
+   ```
+   Para Markdown → Word, usa `md_path` y un directorio de salida:
+   ```json
+   {
+     "md_path": "/ruta/a/manual.md",
+     "output_path": "/tmp/md2docx-inspector-test"
    }
    ```
 4. Pulsa **Run Tool**. Verás el JSON de respuesta y, en la pestaña **Notifications**, los logs del servidor.
@@ -88,6 +98,13 @@ print("tools/call:", call("tools/call", {
         "output_path": "/tmp/pdf2md-probe",
     },
 }))
+print("tools/call (md2docx):", call("tools/call", {
+    "name": "convert_markdown_to_docx",
+    "arguments": {
+        "md_path": "/ruta/a/manual.md",
+        "output_path": "/tmp/md2docx-probe",
+    },
+}))
 proc.terminate()
 ```
 
@@ -100,8 +117,9 @@ uv run python scripts/probe_mcp.py
 La forma definitiva de probarlo: configurar `mcp.json` (ya documentado en el README) y pedirle al modelo que ejecute la tool. Ejemplo de prompt:
 
 > "Convierte el PDF `/ruta/a/libro.pdf` con `convert_pdf_to_markdown`, el Word
-> `/ruta/a/informe.docx` con `convert_docx_to_markdown`, o el Excel
-> `/ruta/a/reporte.xlsx` con `convert_xlsx_to_markdown` y muéstrame el JSON de salida."
+> `/ruta/a/informe.docx` con `convert_docx_to_markdown`, el Excel
+> `/ruta/a/reporte.xlsx` con `convert_xlsx_to_markdown`, o el Markdown
+> `/ruta/a/manual.md` con `convert_markdown_to_docx` y muéstrame el JSON de salida."
 
 ---
 

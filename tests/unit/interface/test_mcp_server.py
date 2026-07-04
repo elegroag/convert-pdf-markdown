@@ -9,17 +9,21 @@ from unittest.mock import MagicMock
 import pytest
 
 from docx2md.application.dto.dtos import ConversionResult as DocxConversionResult
+from md2docx.application.dto.dtos import ConversionResult as Md2DocxConversionResult
 from pdf2md.application.dto.dtos import ConversionResult
-from xlsx2md.application.dto.dtos import ConversionResult as XlsxConversionResult
 from pdf2md.interface.mcp.server import (
     format_conversion_result,
     format_docx_conversion_result,
+    format_md2docx_conversion_result,
     format_xlsx_conversion_result,
+    resolve_md2docx_output_paths,
     resolve_output_paths,
     run_conversion,
     run_docx_conversion,
+    run_md2docx_conversion,
     run_xlsx_conversion,
 )
+from xlsx2md.application.dto.dtos import ConversionResult as XlsxConversionResult
 
 
 class TestResolveOutputPaths:
@@ -218,8 +222,112 @@ class TestFormatXlsxConversionResult:
         assert payload["elapsed_seconds"] == 0.88
 
 
+class TestResolveMd2DocxOutputPaths:
+    def test_directory_destination(self) -> None:
+        md = Path("/tmp/manual.md")
+        out_dir, expected = resolve_md2docx_output_paths(md, Path("/tmp/output"))
+        assert out_dir == Path("/tmp/output")
+        assert expected == Path("/tmp/output/manual.docx")
+
+    def test_file_destination(self) -> None:
+        md = Path("/tmp/manual.md")
+        out_dir, expected = resolve_md2docx_output_paths(
+            md, Path("/tmp/output/custom.docx")
+        )
+        assert out_dir == Path("/tmp/output")
+        assert expected == Path("/tmp/output/custom.docx")
+
+
+class TestFormatMd2DocxConversionResult:
+    def test_success_payload(self) -> None:
+        result = Md2DocxConversionResult(
+            status="success",
+            docx_path=Path("/out/manual.docx"),
+            md_path=Path("/out/manual.md"),
+            sections=3,
+            refined=True,
+            elapsed_seconds=1.234,
+        )
+        payload = json.loads(format_md2docx_conversion_result(result))
+        assert payload["status"] == "success"
+        assert payload["docx_path"] == "/out/manual.docx"
+        assert payload["refined"] is True
+
+
+class TestRunMd2DocxConversion:
+    def test_missing_md_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError, match="Markdown not found"):
+            run_md2docx_conversion(tmp_path / "missing.md", tmp_path / "out")
+
+    def test_non_md_extension_raises(self, tmp_path: Path) -> None:
+        txt = tmp_path / "file.txt"
+        txt.write_text("hello")
+        with pytest.raises(ValueError, match="\\.md extension"):
+            run_md2docx_conversion(txt, tmp_path / "out")
+
+    def test_happy_path_with_mocked_service(self, tmp_path: Path) -> None:
+        md = tmp_path / "sample.md"
+        md.write_text("# Sample", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        docx_path = out_dir / "sample.docx"
+
+        mock_service = MagicMock()
+        mock_service.convert.return_value = Md2DocxConversionResult(
+            status="success",
+            docx_path=docx_path,
+            md_path=out_dir / "MANUAL_COMPLETO.md",
+            sections=1,
+            refined=False,
+            elapsed_seconds=0.5,
+        )
+        mock_factory = MagicMock(return_value=mock_service)
+
+        result = run_md2docx_conversion(
+            md,
+            out_dir,
+            service_factory=mock_factory,
+        )
+        assert result.status == "success"
+        mock_factory.assert_called_once()
+        mock_service.convert.assert_called_once()
+
+    def test_pandoc_error_propagates_via_result(self, tmp_path: Path) -> None:
+        md = tmp_path / "sample.md"
+        md.write_text("# Sample", encoding="utf-8")
+
+        mock_service = MagicMock()
+        mock_service.convert.return_value = Md2DocxConversionResult(
+            status="error",
+            error="PandocNotFoundError",
+            error_message="missing",
+        )
+        mock_factory = MagicMock(return_value=mock_service)
+
+        result = run_md2docx_conversion(
+            md,
+            tmp_path / "out",
+            service_factory=mock_factory,
+        )
+        assert result.status == "error"
+        assert result.error == "PandocNotFoundError"
+
+
 class TestMcpServerMetadata:
     def test_server_name_is_generic(self) -> None:
         from pdf2md.interface.mcp.server import mcp
 
         assert mcp.name == "convert2md"
+
+    def test_exposes_four_tools(self) -> None:
+        import asyncio
+
+        from pdf2md.interface.mcp.server import mcp
+
+        tools = asyncio.run(mcp.list_tools())
+        tool_names = {tool.name for tool in tools}
+        assert tool_names == {
+            "convert_pdf_to_markdown",
+            "convert_docx_to_markdown",
+            "convert_xlsx_to_markdown",
+            "convert_markdown_to_docx",
+        }

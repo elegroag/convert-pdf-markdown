@@ -62,13 +62,14 @@ convert2md-mcp = "pdf2md.interface.mcp.server:main"
 pdf2md-mcp = "pdf2md.interface.mcp.server:main"  # deprecated alias
 docx2md = "docx2md.interface.cli.app:main"
 xlsx2md = "xlsx2md.interface.cli.app:main"
+md2docx = "md2docx.interface.cli.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["pdf2md*", "docx2md*", "xlsx2md*"]
+include = ["pdf2md*", "docx2md*", "xlsx2md*", "md2docx*"]
 
 [tool.ruff]
 line-length = 100

@@ -21,11 +21,13 @@ class ConversionRequest:
         pdf_path: Path of the source PDF.
         output_dir: Directory where Markdown and assets will be written.
         config: Optional conversion configuration override.
+        password: Optional password for encrypted PDFs.
     """
 
     pdf_path: Path
     output_dir: Path
     config: ConversionConfig | None = None
+    password: str | None = None
 
 
 @dataclass(frozen=True)

@@ -33,10 +33,13 @@ from pdf2md.domain.services.anchor_slug import AnchorSlug
 from pdf2md.domain.services.caption_inference import infer_captions
 from pdf2md.domain.services.code_line_joiner import CodeLineJoiner
 from pdf2md.domain.services.block_sanitizer import BlockSanitizer
+from pdf2md.domain.services.column_reorderer import ColumnReorderer
 from pdf2md.domain.services.frontmatter_builder import FrontmatterBuilder
 from pdf2md.domain.services.heading_inferer import HeadingInferer
+from pdf2md.domain.services.inline_links import apply_inline_links
 from pdf2md.domain.services.page_noise_filter import PageNoiseFilter
 from pdf2md.domain.services.paragraph_joiner import ParagraphJoiner
+from pdf2md.domain.services.reading_order import PageChunk, build_reading_order
 from pdf2md.domain.services.section_number_joiner import SectionNumberJoiner
 from pdf2md.domain.value_objects.enums import BlockType, HeadingStyle
 from pdf2md.domain.value_objects.value_objects import ContentBlock, ConversionConfig
@@ -278,11 +281,22 @@ class MarkdownRenderer(IRenderer):
                 blocks = BlockSanitizer.demote_false_headings(blocks)
                 blocks = SectionNumberJoiner.join(blocks)
                 joined_blocks = ParagraphJoiner.join(blocks)
+                joined_blocks = ColumnReorderer.reorder(
+                    joined_blocks, page_width=page.page_width
+                )
                 # v0.2.0: assign captions to images from nearby text
                 # blocks before rendering.
-                infer_captions(page.images, joined_blocks)
-                page_with_joined = page
-                page_with_joined.blocks = joined_blocks
+                page_with_joined = PdfPage(
+                    page_number=page.page_number,
+                    raw_text=page.raw_text,
+                    blocks=joined_blocks,
+                    images=page.images,
+                    tables=page.tables,
+                    links=page.links,
+                    page_width=page.page_width,
+                    table_extraction_failed=page.table_extraction_failed,
+                )
+                infer_captions(page_with_joined.images, joined_blocks)
                 rendered = self._render_page(
                     page_with_joined, font_levels, body_size=body_size
                 )
@@ -324,113 +338,48 @@ class MarkdownRenderer(IRenderer):
         """Render a single page to its Markdown body."""
         chunks: list[str] = []
         image_index = 0
-        # Accumulate code blocks as ContentBlock so we can apply CodeLineJoiner
-        # (re-joins mid-statement lines that PyMuPDF extracted separately).
         code_buffer: list[ContentBlock] = []
         list_marker: str | None = None
-        for block in page.blocks:
-            # Standalone bullet or numbered marker → combine with next block
-            stripped = block.text.strip()
-            # A paragraph that BEGINS with ``●​`` (bullet + zero-width
-            # space + text) is already a list item, no splitting needed.
-            # The zero-width space comes from PyMuPDF when the bullet
-            # glyph is glued to the next visual line.
-            if (
-                block.block_type == BlockType.PARAGRAPH.value
-                and re.match(r"^●\u200b?\s+\S", stripped)
-            ):
-                if code_buffer:
-                    chunks.append(self._flush_code(code_buffer))
-                    code_buffer = []
-                chunks.append(
-                    self._escape_leading_hash("- " + re.sub(r"^●\u200b?\s+", "", stripped))
-                )
-                continue
-            if (
-                block.block_type in (BlockType.PARAGRAPH.value, BlockType.LIST_ITEM.value)
-                and (
-                    re.match(r"^●(\u200b)?\s*$", stripped)
-                    or re.match(r"^\d+[.)]\s*$", stripped)
-                )
-            ):
-                if re.match(r"^●", stripped):
-                    list_marker = "-"
-                else:
-                    list_marker = stripped
-                continue
+        ordered = build_reading_order(page)
 
-            if list_marker is not None:
-                if code_buffer:
-                    chunks.append(self._flush_code(code_buffer))
-                    code_buffer = []
-                text = f"{list_marker} {block.text.lstrip()}"
-                chunks.append(self._escape_leading_hash(text))
-                list_marker = None
-                continue
-
-            is_heading = block.block_type == BlockType.HEADING.value or (
-                block.block_type == BlockType.PARAGRAPH.value
-                and HeadingInferer.looks_like_heading(
-                    block, font_levels, body_size=body_size
-                )
+        if page.table_extraction_failed:
+            chunks.append(
+                _TABLE_FAIL_MARKER.format(page=page.page_number, bbox="unknown")
             )
-            if is_heading:
+
+        for item in ordered:
+            if item.kind == "table" and item.table is not None:
                 if code_buffer:
                     chunks.append(self._flush_code(code_buffer))
                     code_buffer = []
-                level = HeadingInferer.resolve_level(block, font_levels)
-                if level <= 0:
-                    level = 1
-                chunks.append(self._format_heading(block.text.strip(), level))
-            elif block.block_type == BlockType.CODE.value:
-                code_buffer.append(block)
-            elif block.block_type == BlockType.LIST_ITEM.value:
+                list_marker = None
+                chunks.append(self._render_table(item.table))
+                continue
+            if item.kind == "image" and item.image is not None:
                 if code_buffer:
                     chunks.append(self._flush_code(code_buffer))
                     code_buffer = []
-                chunks.append(self._escape_leading_hash(_escape_html_in_text(block.text)))
-            else:
-                # PARAGRAPH block — check if it's actually HTML/code misclassified
-                if _is_pure_html_block(block.text) or _looks_like_code_line(block.text):
-                    # Treat as code block to preserve formatting
-                    code_buffer.append(block)
-                elif _is_html_fragment_paragraph(block.text):
-                    # Lines that OPEN with a tag (e.g. ``<template> <div>...``)
-                    # are always code fragments — never prose. Treating them
-                    # as prose would either escape their tags (corrupting
-                    # the surrounding code) or render them as raw HTML
-                    # that the Markdown reader would interpret. Accumulate
-                    # them into the code buffer instead.
-                    code_buffer.append(block)
-                elif _is_sfc_continuation(code_buffer, block.text):
-                    # The current SFC / code block did NOT close on the
-                    # last accumulated block (e.g. a ``<script>`` block
-                    # with no ``</script>``) and this paragraph looks
-                    # like its body. Keep accumulating so the result is
-                    # a single fenced chunk instead of an SFC + loose
-                    # paragraph + new fence.
-                    code_buffer.append(block)
-                else:
-                    # Flush any pending code before emitting prose
-                    if code_buffer:
-                        chunks.append(self._flush_code(code_buffer))
-                        code_buffer = []
-                    chunks.append(self._escape_leading_hash(_escape_html_in_text(block.text)))
+                list_marker = None
+                image_index += 1
+                chunks.append(self._render_image(item.image, image_index))
+                continue
+            if item.kind != "text" or item.block is None:
+                continue
+
+            chunk, code_buffer, list_marker = self._render_text_block(
+                item.block,
+                page,
+                font_levels,
+                body_size=body_size,
+                code_buffer=code_buffer,
+                list_marker=list_marker,
+            )
+            if chunk:
+                chunks.append(chunk)
+
         if code_buffer:
             chunks.append(self._flush_code(code_buffer))
 
-        # Tables
-        for table in page.tables:
-            chunks.append(self._render_table(table))
-
-        # Images
-        for image in page.images:
-            image_index += 1
-            chunks.append(self._render_image(image, image_index))
-
-        # Links — only when the user explicitly opts in. Default off
-        # because the in-text references are usually enough and a link
-        # dump at the page bottom is noisy.
         if self._config.emit_link_list and page.links:
             link_lines: list[str] = []
             for link in page.links:
@@ -444,6 +393,99 @@ class MarkdownRenderer(IRenderer):
         return self._dedupe_consecutive_chunks(
             "\n\n".join(c for c in chunks if c)
         )
+
+    def _render_text_block(
+        self,
+        block: ContentBlock,
+        page: PdfPage,
+        font_levels: dict[str, int],
+        *,
+        body_size: float,
+        code_buffer: list[ContentBlock],
+        list_marker: str | None,
+    ) -> tuple[str | None, list[ContentBlock], str | None]:
+        """Render one text block, returning chunk and updated code/list state."""
+        stripped = block.text.strip()
+        if (
+            block.block_type == BlockType.PARAGRAPH.value
+            and re.match(r"^●\u200b?\s+\S", stripped)
+        ):
+            if code_buffer:
+                return (self._flush_code(code_buffer), [], None)
+            text = apply_inline_links(
+                "- " + re.sub(r"^●\u200b?\s+", "", stripped),
+                page.links,
+                block=block,
+            )
+            return (self._escape_leading_hash(text), [], None)
+
+        if (
+            block.block_type in (BlockType.PARAGRAPH.value, BlockType.LIST_ITEM.value)
+            and (
+                re.match(r"^●(\u200b)?\s*$", stripped)
+                or re.match(r"^\d+[.)]\s*$", stripped)
+            )
+        ):
+            marker = "-" if re.match(r"^●", stripped) else stripped
+            return ("", code_buffer, marker)
+
+        if list_marker is not None:
+            if code_buffer:
+                return (self._flush_code(code_buffer), [], None)
+            text = apply_inline_links(
+                f"{list_marker} {block.text.lstrip()}",
+                page.links,
+                block=block,
+            )
+            return (self._escape_leading_hash(text), [], None)
+
+        is_heading = block.block_type == BlockType.HEADING.value or (
+            block.block_type == BlockType.PARAGRAPH.value
+            and HeadingInferer.looks_like_heading(
+                block,
+                font_levels,
+                body_size=body_size,
+                page_number=page.page_number,
+            )
+        )
+        if is_heading:
+            if code_buffer:
+                return (self._flush_code(code_buffer), [], None)
+            level = HeadingInferer.resolve_level(
+                block, font_levels, page_number=page.page_number
+            )
+            if level <= 0:
+                level = 1
+            return (self._format_heading(block.text.strip(), level), [], None)
+        if block.block_type == BlockType.CODE.value:
+            code_buffer.append(block)
+            return ("", code_buffer, None)
+        if block.block_type == BlockType.LIST_ITEM.value:
+            if code_buffer:
+                return (self._flush_code(code_buffer), [], None)
+            text = apply_inline_links(block.text, page.links, block=block)
+            return (self._escape_leading_hash(_escape_html_in_text(text)), [], None)
+
+        if _is_pure_html_block(block.text) or _looks_like_code_line(block.text):
+            code_buffer.append(block)
+            return ("", code_buffer, None)
+        if _is_html_fragment_paragraph(block.text):
+            code_buffer.append(block)
+            return ("", code_buffer, None)
+        if _is_sfc_continuation(code_buffer, block.text):
+            code_buffer.append(block)
+            return ("", code_buffer, None)
+
+        if code_buffer:
+            flushed = self._flush_code(code_buffer)
+            code_buffer = []
+        else:
+            flushed = None
+        text = apply_inline_links(block.text, page.links, block=block)
+        rendered = self._escape_leading_hash(_escape_html_in_text(text))
+        if flushed:
+            return (f"{flushed}\n\n{rendered}", [], None)
+        return (rendered, [], None)
 
     @staticmethod
     def _dedupe_consecutive_chunks(text: str) -> str:

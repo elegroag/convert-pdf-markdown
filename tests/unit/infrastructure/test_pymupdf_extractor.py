@@ -19,8 +19,8 @@ from pdf2md.domain.exceptions import (
 )
 from pdf2md.domain.value_objects.enums import TableEngine
 from pdf2md.domain.value_objects.value_objects import ConversionConfig
-from pdf2md.infrastructure.extractors.pymupdf_extractor import (
-    PyMuPdfExtractor,
+from pdf2md.infrastructure.extractors.pymupdf_extractor import PyMuPdfExtractor
+from pdf2md.infrastructure.extractors.table_extractor_factory import (
     build_default_table_extractor,
 )
 
@@ -187,6 +187,10 @@ class TestBulletRegex:
 
 
 class TestBuildDefaultTableExtractor:
-    def test_default_table_extractor_is_pdfplumber(self) -> None:
+    def test_default_table_extractor_is_scoped_pdfplumber(self) -> None:
         ext = build_default_table_extractor(TableEngine.PDFPLUMBER)
-        assert type(ext).__name__ == "PdfplumberTableExtractor"
+        assert type(ext).__name__ == "DocumentScopedTableExtractor"
+
+    def test_camelot_table_extractor(self) -> None:
+        ext = build_default_table_extractor(TableEngine.CAMELOT)
+        assert type(ext).__name__ == "DocumentScopedTableExtractor"

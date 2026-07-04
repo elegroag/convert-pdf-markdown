@@ -25,7 +25,12 @@ docx2md batch ./documentos/ -o ./output --workers 2
 xlsx2md convert libro.xlsx -o ./output
 xlsx2md batch ./hojas/ -o ./output --workers 2
 
-# MCP (PDF + Word + Excel)
+# Markdown → Word (.docx)
+md2docx convert manual.md -o ./output
+md2docx convert manual.md -o ./output --source-dir ./secciones
+md2docx batch ./manuales/ -o ./output --workers 2
+
+# MCP (PDF + Word + Excel + MD→DOCX)
 uvx --from "/ruta/al/convert-pdf-markdown[mcp]" convert2md-mcp
 ```
 
@@ -54,6 +59,14 @@ src/xlsx2md/
 ├── domain/           # Entities, value objects, ports, use cases (no I/O deps)
 ├── application/      # DTOs and ConversionService façade
 ├── infrastructure/   # openpyxl parser, renderers, storage
+├── config/           # Service factory
+└── interface/
+    └── cli/          # Typer CLI (convert, batch, version)
+
+src/md2docx/
+├── domain/           # Entities, value objects, ports, use cases (no I/O deps)
+├── application/      # DTOs and ConversionService façade
+├── infrastructure/   # pandoc, LibreOffice, python-docx reference builder
 ├── config/           # Service factory
 └── interface/
     └── cli/          # Typer CLI (convert, batch, version)

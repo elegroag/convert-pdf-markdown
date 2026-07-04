@@ -31,6 +31,7 @@ import re
 from collections import Counter
 
 from pdf2md.domain.entities.entities import PdfDocument
+from pdf2md.domain.services.block_key import block_position_key
 from pdf2md.domain.value_objects.enums import BlockType
 from pdf2md.domain.value_objects.value_objects import ContentBlock
 
@@ -260,10 +261,8 @@ class HeadingInferer:
     ) -> dict[str, int]:
         """Map the document's heading candidates to levels 1..max_level.
 
-        Returns a ``{block_text: level}`` mapping. Block text is used as
-        the key because two different font sizes (or no size at all) may
-        mark the same heading class; the renderer looks up the level by
-        text equality. Empty mapping when nothing qualifies.
+        Returns a ``{position_key: level}`` mapping. Keys combine page
+        number, Y position, and text so repeated titles stay distinct.
 
         Args:
             document: The PDF document to analyse.
@@ -272,19 +271,21 @@ class HeadingInferer:
         """
         max_level = max(1, min(6, max_level))
 
-        all_blocks: list[ContentBlock] = []
+        all_blocks: list[tuple[int, ContentBlock]] = []
         for page in document.pages:
-            all_blocks.extend(page.blocks)
+            for block in page.blocks:
+                all_blocks.append((page.page_number, block))
 
         if not all_blocks:
             return {}
 
+        blocks_only = [block for _, block in all_blocks]
         # Body size = weighted mode of font_size for non-code, non-list blocks.
-        body_size = HeadingInferer._compute_body_size(all_blocks)
+        body_size = HeadingInferer._compute_body_size(blocks_only)
         if body_size <= 0:
             body_candidates = [
                 round(b.font_size, 2)
-                for b in all_blocks
+                for b in blocks_only
                 if b.block_type
                 not in (BlockType.CODE.value, BlockType.LIST_ITEM.value)
                 and b.font_size > 0
@@ -292,11 +293,11 @@ class HeadingInferer:
             if not body_candidates:
                 return {}
             body_size, _ = Counter(body_candidates).most_common(1)[0]
-        body_avg, body_max = HeadingInferer._body_word_stats(all_blocks)
+        body_avg, body_max = HeadingInferer._body_word_stats(blocks_only)
 
         # Score every block; remember its order for tiebreaking.
-        scored: list[tuple[ContentBlock, float, int]] = []
-        for order, block in enumerate(all_blocks):
+        scored: list[tuple[int, ContentBlock, float, int]] = []
+        for order, (page_number, block) in enumerate(all_blocks):
             s = HeadingInferer.score_block(
                 block,
                 body_size=body_size,
@@ -305,7 +306,7 @@ class HeadingInferer:
                 body_max_words=body_max,
             )
             if s >= _HEADING_SCORE_THRESHOLD:
-                scored.append((block, s, order))
+                scored.append((page_number, block, s, order))
 
         if not scored:
             return {}
@@ -316,9 +317,9 @@ class HeadingInferer:
         def _bucket(b: ContentBlock, s: float) -> tuple[float, float]:
             return (round(b.font_size, 1), round(s, 2))
 
-        buckets: dict[tuple[float, float], list[ContentBlock]] = {}
-        for block, s, _ in scored:
-            buckets.setdefault(_bucket(block, s), []).append(block)
+        buckets: dict[tuple[float, float], list[tuple[int, ContentBlock]]] = {}
+        for page_number, block, s, _ in scored:
+            buckets.setdefault(_bucket(block, s), []).append((page_number, block))
 
         def _natural_bonus(text: str) -> float:
             """A real book heading is a natural-language phrase. A short
@@ -349,15 +350,14 @@ class HeadingInferer:
         winners: list[tuple[str, int]] = []
         ordered_buckets = sorted(
             buckets.items(),
-            key=lambda kv: (-kv[0][0], -kv[0][1], kv[1][0].text),
+            key=lambda kv: (-kv[0][0], -kv[0][1], kv[1][0][1].text),
         )
-        for bucket_key, blocks in ordered_buckets:
-            # Pick the most natural-language block in the bucket.
+        for _bucket_key, blocks in ordered_buckets:
             sorted_blocks = sorted(
-                blocks, key=lambda b: (-_natural_bonus(b.text), b.text)
+                blocks, key=lambda item: (-_natural_bonus(item[1].text), item[1].text)
             )
-            for block in sorted_blocks:
-                key = block.text.strip()
+            for page_number, block in sorted_blocks:
+                key = block_position_key(page_number, block)
                 if key in seen_text:
                     continue
                 seen_text.add(key)
@@ -380,13 +380,13 @@ class HeadingInferer:
         font_levels: dict[str, int],
         *,
         body_size: float = 0.0,
+        page_number: int = 1,
     ) -> bool:
         """Heuristic: is this block promoted to a heading?
 
-        ``font_levels`` keys are normalised to the block's text (after
-        the v0.2.0 refactor). When the text key is present, the block is
-        a heading. Otherwise we run a lightweight multi-signal check that
-        matches :meth:`score_block`'s logic for the common cases.
+        ``font_levels`` keys are position-aware block keys. When present,
+        the block is a heading. Otherwise a lightweight multi-signal check
+        matches :meth:`score_block` for common cases.
         """
         if block.block_type == BlockType.HEADING.value:
             return True
@@ -400,6 +400,8 @@ class HeadingInferer:
             return False
         if _HTML_CODE_RE.match(block.text):
             return False
+        if block_position_key(page_number, block) in font_levels:
+            return True
         if block.text.strip() in font_levels:
             return True
         words = len(_WORD_RE.findall(block.text))
@@ -421,14 +423,18 @@ class HeadingInferer:
 
     @staticmethod
     def resolve_level(
-        block: ContentBlock, font_levels: dict[str, int]
+        block: ContentBlock,
+        font_levels: dict[str, int],
+        *,
+        page_number: int = 1,
     ) -> int:
         """Return the heading level for a single ``block``.
 
         Precedence:
-            1. The level mapped from the block's text in ``font_levels``.
-            2. ``block.level`` if the extractor already set one.
-            3. ``0`` if the block is not a heading.
+            1. The level mapped from the block's position key in ``font_levels``.
+            2. The level mapped from plain text (legacy compatibility).
+            3. ``block.level`` if the extractor already set one.
+            4. ``0`` if the block is not a heading.
         """
         if not block.text.strip():
             return 0
@@ -440,9 +446,12 @@ class HeadingInferer:
             return 0
         if _HTML_CODE_RE.match(block.text):
             return 0
-        key = block.text.strip()
-        if key in font_levels:
-            return font_levels[key]
+        position_key = block_position_key(page_number, block)
+        if position_key in font_levels:
+            return font_levels[position_key]
+        text_key = block.text.strip()
+        if text_key in font_levels:
+            return font_levels[text_key]
         if block.level:
             return block.level
         return 0

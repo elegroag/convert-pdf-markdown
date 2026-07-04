@@ -24,14 +24,22 @@ except ImportError as exc:  # pragma: no cover
 _PIPE_RE = re.compile(r"[|]")
 _NEWLINE_RE = re.compile(r"[\r\n]+")
 
+LATTICE_TABLE_SETTINGS: dict[str, Any] = {
+    "vertical_strategy": "lines",
+    "horizontal_strategy": "lines",
+    "intersection_tolerance": 5,
+}
+
+STREAM_TABLE_SETTINGS: dict[str, Any] = {
+    "vertical_strategy": "text",
+    "horizontal_strategy": "text",
+    "snap_tolerance": 3,
+    "join_tolerance": 3,
+}
+
 
 def _sanitize_cell(text: str) -> str:
-    """Sanitize a cell for GFM tables.
-
-    - Escapes pipes.
-    - Replaces newlines with spaces.
-    - Strips control characters.
-    """
+    """Sanitize a cell for GFM tables."""
     if text is None:
         return ""
     text = _NEWLINE_RE.sub(" ", str(text))
@@ -39,26 +47,57 @@ def _sanitize_cell(text: str) -> str:
     return text.strip()
 
 
+def _looks_like_table(rows: list[list[str]]) -> bool:
+    """Reject stream false-positives that split prose into single-column rows."""
+    if len(rows) < 2:
+        return False
+    max_cols = max(len(row) for row in rows)
+    if max_cols < 2:
+        return False
+    cells = [cell for row in rows for cell in row]
+    if not cells:
+        return False
+    non_empty = sum(1 for cell in cells if cell)
+    return non_empty / len(cells) >= 0.4
+
+
 class PdfplumberTableExtractor(ITableExtractor):
-    """Extract tables from a PDF using pdfplumber's line-based strategy."""
+    """Extract tables from a PDF using pdfplumber."""
 
     def __init__(self, table_settings: dict | None = None) -> None:
-        self._settings: dict[str, Any] = table_settings or {
-            "vertical_strategy": "lines",
-            "horizontal_strategy": "lines",
-            "intersection_tolerance": 5,
-        }
+        self._settings: dict[str, Any] = table_settings or dict(LATTICE_TABLE_SETTINGS)
+        self._pdf: Any | None = None
+        self._pdf_path: Path | None = None
+
+    def begin_document(self, pdf_path: Path) -> None:
+        """Open ``pdf_path`` once for the current extraction run."""
+        path = Path(pdf_path)
+        if self._pdf_path == path and self._pdf is not None:
+            return
+        self.end_document()
+        self._pdf_path = path
+        self._pdf = pdfplumber.open(path)
+
+    def end_document(self) -> None:
+        """Close the cached pdfplumber handle."""
+        if self._pdf is not None:
+            self._pdf.close()
+        self._pdf = None
+        self._pdf_path = None
 
     def extract_tables(
         self, pdf_path: Path, page_number: int
     ) -> list[TableNode]:
         """Extract all tables from a specific PDF page."""
         try:
-            with pdfplumber.open(pdf_path) as pdf:
-                if page_number < 1 or page_number > len(pdf.pages):
-                    return []
-                page = pdf.pages[page_number - 1]
-                raw_tables = page.find_tables(table_settings=self._settings)
+            if self._pdf is None or self._pdf_path != Path(pdf_path):
+                self.begin_document(pdf_path)
+            pdf = self._pdf
+            assert pdf is not None
+            if page_number < 1 or page_number > len(pdf.pages):
+                return []
+            page = pdf.pages[page_number - 1]
+            raw_tables = page.find_tables(table_settings=self._settings)
         except Exception as exc:  # noqa: BLE001
             raise TableExtractionError(
                 f"pdfplumber failed on page {page_number}: {exc}"
@@ -71,12 +110,9 @@ class PdfplumberTableExtractor(ITableExtractor):
                 if not rows:
                     continue
                 rows = [[_sanitize_cell(c) for c in row] for row in rows]
-                if not rows:
-                    continue
-                # Decide whether the first row is a header: typical PDFs
-                # mark headers via background colour or bold text. With
-                # pdfplumber we have neither easily, so we treat the first
-                # row as headers when all its cells are non-empty.
+                if self._settings.get("vertical_strategy") == "text":
+                    if not _looks_like_table(rows):
+                        continue
                 first = rows[0]
                 has_header = all(cell for cell in first)
                 if has_header:
@@ -102,4 +138,8 @@ class PdfplumberTableExtractor(ITableExtractor):
         return results
 
 
-__all__ = ["PdfplumberTableExtractor"]
+__all__ = [
+    "LATTICE_TABLE_SETTINGS",
+    "PdfplumberTableExtractor",
+    "STREAM_TABLE_SETTINGS",
+]

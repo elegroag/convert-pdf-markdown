@@ -45,6 +45,27 @@ class ConversionService:
         self._extractor = extractor  # kept for inspect()
         self._default_config = default_config or ConversionConfig()
 
+    def _merge_config(self, request: ConversionRequest) -> ConversionConfig:
+        base = request.config or self._default_config
+        if request.password is None:
+            return base
+        return ConversionConfig(
+            image_min_size=base.image_min_size,
+            extract_tables=base.extract_tables,
+            table_extractor=base.table_extractor,
+            extract_links=base.extract_links,
+            frontmatter=base.frontmatter,
+            extract_images=base.extract_images,
+            heading_style=base.heading_style,
+            code_fence=base.code_fence,
+            assets_subdir=base.assets_subdir,
+            emit_link_list=base.emit_link_list,
+            password=request.password,
+            pages_filter=base.pages_filter,
+            extractor_engine=base.extractor_engine,
+            batch_executor=base.batch_executor,
+        )
+
     def convert(self, request: ConversionRequest) -> ConversionResult:
         """Run a single conversion.
 
@@ -57,7 +78,8 @@ class ConversionService:
         domain_request = ConvertPdfRequest(
             pdf_path=Path(request.pdf_path),
             output_dir=Path(request.output_dir),
-            config=request.config or self._default_config,
+            config=self._merge_config(request),
+            password=request.password,
         )
         domain_result: ConvertPdfResult = self._use_case.execute(domain_request)
         return _to_dto(domain_result)

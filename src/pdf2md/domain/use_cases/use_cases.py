@@ -216,10 +216,29 @@ class BatchConvertUseCase:
             return BatchReport(total=0, success=0, failed=0)
 
         def _worker(pdf_path: Path) -> BatchItemResult:
+            merged = config.config
+            if config.pages_filter and not merged.pages_filter:
+                merged = ConversionConfig(
+                    image_min_size=merged.image_min_size,
+                    extract_tables=merged.extract_tables,
+                    table_extractor=merged.table_extractor,
+                    extract_links=merged.extract_links,
+                    frontmatter=merged.frontmatter,
+                    extract_images=merged.extract_images,
+                    heading_style=merged.heading_style,
+                    code_fence=merged.code_fence,
+                    assets_subdir=merged.assets_subdir,
+                    emit_link_list=merged.emit_link_list,
+                    password=merged.password,
+                    pages_filter=config.pages_filter,
+                    extractor_engine=config.extractor,
+                    batch_executor=merged.batch_executor,
+                )
             request = ConvertPdfRequest(
                 pdf_path=pdf_path,
                 output_dir=pdf_path.parent,
-                config=config.config,
+                config=merged,
+                password=merged.password,
             )
             result = self._convert.execute(request)
             return BatchItemResult(

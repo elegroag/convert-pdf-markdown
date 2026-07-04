@@ -101,6 +101,8 @@ class PdfPage:
     images: list[ImageAsset] = field(default_factory=list)
     tables: list[TableNode] = field(default_factory=list)
     links: list[Link] = field(default_factory=list)
+    page_width: float = 0.0
+    table_extraction_failed: bool = False
 
 
 @dataclass

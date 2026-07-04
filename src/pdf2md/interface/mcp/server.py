@@ -1,4 +1,5 @@
-"""MCP server exposing PDF, Word, and Excel → Markdown conversion.
+"""MCP server exposing PDF, Word, and Excel → Markdown conversion
+and Markdown → Word (.docx) generation.
 
 Run with uvx (stdio transport, no authentication)::
 
@@ -32,6 +33,14 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
+from md2docx.application.dto.dtos import ConversionRequest as Md2DocxConversionRequest
+from md2docx.application.dto.dtos import ConversionResult as Md2DocxConversionResult
+from md2docx.application.services.conversion_service import (
+    ConversionService as Md2DocxConversionService,
+)
+from md2docx.config.service_factory import build_default_service as build_md2docx_service
+from md2docx.domain.services.anchor_slug import AnchorSlug as Md2DocxAnchorSlug
+from md2docx.domain.value_objects.value_objects import ConversionConfig as Md2DocxConversionConfig
 from docx2md.application.dto.dtos import ConversionRequest as DocxConversionRequest
 from docx2md.application.dto.dtos import ConversionResult as DocxConversionResult
 from docx2md.application.services.conversion_service import (
@@ -57,7 +66,8 @@ mcp = FastMCP(
     name="convert2md",
     instructions=(
         "Convert PDF, Word (.docx), and Excel (.xlsx) documents to structured "
-        "Markdown with headings, images, tables, links, and code blocks."
+        "Markdown with headings, images, tables, links, and code blocks. "
+        "Also generate Word (.docx) from Markdown manuals."
     ),
 )
 
@@ -240,6 +250,72 @@ def run_xlsx_conversion(
     )
 
 
+def resolve_md2docx_output_paths(
+    source_path: Path,
+    output_path: Path,
+) -> tuple[Path, Path]:
+    """Return ``(output_dir, expected_docx_file)`` for an md2docx job."""
+    if output_path.suffix.lower() == ".docx":
+        return output_path.parent, output_path
+    slug = Md2DocxAnchorSlug.slugify(source_path.stem)
+    return output_path, output_path / f"{slug}.docx"
+
+
+def run_md2docx_conversion(
+    md_path: Path,
+    output_path: Path,
+    *,
+    service_factory=build_md2docx_service,
+    config: Md2DocxConversionConfig | None = None,
+) -> Md2DocxConversionResult:
+    """Execute a single Markdown → DOCX conversion."""
+    md = md_path.expanduser().resolve()
+    if not md.is_file():
+        msg = f"Markdown not found: {md}"
+        raise FileNotFoundError(msg)
+    if md.suffix.lower() != ".md":
+        msg = f"file must have .md extension: {md}"
+        raise ValueError(msg)
+
+    destination = output_path.expanduser().resolve()
+    output_dir, expected_docx = resolve_md2docx_output_paths(md, destination)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = config or Md2DocxConversionConfig(consolidate=False)
+    service: Md2DocxConversionService = service_factory(output_dir=output_dir, config=cfg)
+    result = service.convert(
+        Md2DocxConversionRequest(md_path=md, output_dir=output_dir, config=cfg)
+    )
+
+    if result.status != "success" or result.docx_path is None:
+        return result
+
+    written = Path(result.docx_path).resolve()
+    expected_docx = expected_docx.resolve()
+    if written != expected_docx:
+        expected_docx.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(written), str(expected_docx))
+        return Md2DocxConversionResult(
+            status=result.status,
+            docx_path=expected_docx,
+            md_path=result.md_path,
+            sections=result.sections,
+            refined=result.refined,
+            elapsed_seconds=result.elapsed_seconds,
+            error=result.error,
+            error_message=result.error_message,
+        )
+
+    return result
+
+
+def format_md2docx_conversion_result(result: Md2DocxConversionResult) -> str:
+    """Serialize an md2docx :class:`ConversionResult` as JSON for MCP tool output."""
+    payload = result.to_dict()
+    payload["elapsed_seconds"] = round(result.elapsed_seconds, 2)
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def format_xlsx_conversion_result(result: XlsxConversionResult) -> str:
     """Serialize an xlsx :class:`ConversionResult` as JSON for MCP tool output."""
     payload = result.to_dict()
@@ -314,6 +390,28 @@ def convert_xlsx_to_markdown(xlsx_path: str, output_path: str) -> str:
         msg = result.error_message or result.error or "conversion failed"
         raise RuntimeError(msg)
     return format_xlsx_conversion_result(result)
+
+
+@mcp.tool
+def convert_markdown_to_docx(md_path: str, output_path: str) -> str:
+    """Convert a Markdown file to Word (.docx).
+
+    Args:
+        md_path: Path to the source Markdown file.
+        output_path: Output directory or full path to the ``.docx`` file.
+            When a directory is given, the file is named from the Markdown stem
+            (e.g. ``manual.md`` → ``manual.docx``).
+
+    Returns:
+        JSON with ``status``, ``docx_path``, ``md_path``, section counts,
+        ``refined``, and ``elapsed_seconds``. On failure, includes ``error``
+        and ``error_message``.
+    """
+    result = run_md2docx_conversion(Path(md_path), Path(output_path))
+    if result.status != "success":
+        msg = result.error_message or result.error or "conversion failed"
+        raise RuntimeError(msg)
+    return format_md2docx_conversion_result(result)
 
 
 def main() -> None:

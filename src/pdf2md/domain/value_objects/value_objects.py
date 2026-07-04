@@ -68,12 +68,14 @@ class Link:
         text: The visible text of the link.
         page_number: The page on which the link appears.
         is_internal: True if the link points inside the same document.
+        bbox: Optional bounding box (x0, y0, x1, y1) in PDF units.
     """
 
     url: str
     text: str
     page_number: int
     is_internal: bool = False
+    bbox: tuple[float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,10 @@ class ConversionConfig:
     code_fence: str = "```"
     assets_subdir: str = "assets"
     emit_link_list: bool = False
+    password: str | None = None
+    pages_filter: str | None = None
+    extractor_engine: ExtractorEngine = ExtractorEngine.PYMUPDF
+    batch_executor: str = "thread"
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable dict representation."""
@@ -116,6 +122,10 @@ class ConversionConfig:
             "code_fence": self.code_fence,
             "assets_subdir": self.assets_subdir,
             "emit_link_list": self.emit_link_list,
+            "password": self.password,
+            "pages_filter": self.pages_filter,
+            "extractor_engine": self.extractor_engine.value,
+            "batch_executor": self.batch_executor,
         }
 
     @classmethod
@@ -134,6 +144,12 @@ class ConversionConfig:
             code_fence=str(data.get("code_fence", "```")),
             assets_subdir=str(data.get("assets_subdir", "assets")),
             emit_link_list=bool(data.get("emit_link_list", False)),
+            password=data.get("password") or None,
+            pages_filter=data.get("pages_filter") or None,
+            extractor_engine=ExtractorEngine(
+                str(data.get("extractor_engine", "pymupdf"))
+            ),
+            batch_executor=str(data.get("batch_executor", "thread")),
         )
 
 

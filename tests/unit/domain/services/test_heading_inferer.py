@@ -132,7 +132,7 @@ class TestInferLevelsMultiSignal:
         # All bold short lines live in one bucket; the most natural
         # text wins the H1 slot.
         assert 1 in levels.values()
-        assert "Angular versus Vue" in levels
+        assert any(key.endswith("Angular versus Vue") for key in levels)
 
     def test_returns_empty_when_document_has_only_body(self) -> None:
         """No short/bold/caps lines → no headings."""
